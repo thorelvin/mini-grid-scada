@@ -1,0 +1,24 @@
+<svg width="160" height="118" viewBox="0 0 160 118" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="transformerGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(80 54) rotate(90) scale(54 64)">
+      <stop stop-color="#78A9CE" stop-opacity="0.25"/>
+      <stop offset="1" stop-color="#78A9CE" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="160" height="118" rx="20" fill="url(#transformerGlow)"/>
+  <g stroke="#DCE9F5" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" opacity="0.88">
+    <path d="M79.5 16V100"/>
+    <path d="M35 59H125"/>
+    <circle cx="58" cy="44" r="16"/>
+    <circle cx="80" cy="44" r="16"/>
+    <circle cx="102" cy="44" r="16"/>
+    <circle cx="58" cy="74" r="16"/>
+    <circle cx="80" cy="74" r="16"/>
+    <circle cx="102" cy="74" r="16"/>
+  </g>
+  <g stroke="#8DDF57" stroke-width="2.2" opacity="0.6">
+    <path d="M12 59H28"/>
+    <path d="M132 59H148"/>
+    <path d="M79.5 102V114"/>
+  </g>
+</svg>

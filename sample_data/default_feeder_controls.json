@@ -1,0 +1,42 @@
+[
+  {
+    "id": "F1",
+    "loadKw": 88,
+    "reactivePowerKvar": 18,
+    "phaseImbalancePercent": 6,
+    "breakerStatus": "closed",
+    "communicationState": "good",
+    "faultMode": "normal",
+    "solarKw": 0
+  },
+  {
+    "id": "F2",
+    "loadKw": 132,
+    "reactivePowerKvar": 26,
+    "phaseImbalancePercent": 3,
+    "breakerStatus": "closed",
+    "communicationState": "good",
+    "faultMode": "normal",
+    "solarKw": 0
+  },
+  {
+    "id": "F3",
+    "loadKw": 168,
+    "reactivePowerKvar": 12,
+    "phaseImbalancePercent": 3,
+    "breakerStatus": "closed",
+    "communicationState": "good",
+    "faultMode": "normal",
+    "solarKw": 0
+  },
+  {
+    "id": "F4",
+    "loadKw": 44,
+    "reactivePowerKvar": -4,
+    "phaseImbalancePercent": 3,
+    "breakerStatus": "closed",
+    "communicationState": "good",
+    "faultMode": "normal",
+    "solarKw": 58
+  }
+]

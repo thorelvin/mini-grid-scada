@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mini-grid-scada-backend"
+version = "0.1.0"
+description = "FastAPI backend for the Mini Grid SCADA Demo"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.115,<1.0",
+  "pydantic>=2.7,<3.0",
+  "uvicorn>=0.30,<1.0",
+  "websockets>=12,<16",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.27,<1.0",
+  "pytest>=8.0,<9.0",
+]

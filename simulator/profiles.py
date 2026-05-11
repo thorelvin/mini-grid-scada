@@ -1,0 +1,85 @@
+FEEDER_PROFILES = {
+    "F1": {
+        "name": "Boligfelt",
+        "type": "housing",
+        "ratingA": 160.0,
+        "warningPercent": 90.0,
+        "tripPercent": 110.0,
+        "tripDelaySec": 10.0,
+        "customers": 124,
+        "criticalCustomers": 0,
+        "defaultLoadKw": 88.0,
+        "defaultReactivePowerKvar": 18.0,
+    },
+    "F2": {
+        "name": "Næring og skole",
+        "type": "industry",
+        "ratingA": 220.0,
+        "warningPercent": 90.0,
+        "tripPercent": 110.0,
+        "tripDelaySec": 8.0,
+        "customers": 64,
+        "criticalCustomers": 3,
+        "defaultLoadKw": 132.0,
+        "defaultReactivePowerKvar": 26.0,
+    },
+    "F3": {
+        "name": "Elbillading",
+        "type": "ev_charging",
+        "ratingA": 250.0,
+        "warningPercent": 90.0,
+        "tripPercent": 110.0,
+        "tripDelaySec": 10.0,
+        "customers": 84,
+        "criticalCustomers": 1,
+        "defaultLoadKw": 168.0,
+        "defaultReactivePowerKvar": 12.0,
+    },
+    "F4": {
+        "name": "Sol og prosument",
+        "type": "solar_prosumer",
+        "ratingA": 125.0,
+        "warningPercent": 90.0,
+        "tripPercent": 110.0,
+        "tripDelaySec": 10.0,
+        "customers": 42,
+        "criticalCustomers": 0,
+        "defaultLoadKw": 44.0,
+        "defaultReactivePowerKvar": -4.0,
+        "defaultSolarKw": 58.0,
+    },
+}
+
+DEFAULT_SCENARIOS = [
+    {
+        "id": "normal",
+        "name": "Normal drift",
+        "description": "All feeders operate within normal load and voltage limits.",
+    },
+    {
+        "id": "ev_peak",
+        "name": "Elbil-peak",
+        "description": "F3 ramps up and stresses current, voltage, and transformer loading.",
+    },
+    {
+        "id": "phase_imbalance",
+        "name": "Faseubalanse",
+        "description": "One phase on F1 drifts high compared to the others.",
+    },
+    {
+        "id": "comm_loss",
+        "name": "Kommunikasjonstap",
+        "description": "A feeder or transformer stops delivering trustworthy telemetry.",
+    },
+    {
+        "id": "breaker_trip",
+        "name": "Brytertrip",
+        "description": "A feeder breaker trips and remains blocked until cleared.",
+    },
+    {
+        "id": "high_solar",
+        "name": "Høy solproduksjon",
+        "description": "F4 exports heavily and can drive overvoltage.",
+    },
+]
+
