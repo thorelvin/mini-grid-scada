@@ -11,6 +11,11 @@ import {
   getSeverityLabel,
   sortAlarms,
 } from "../dashboard-utils";
+import {
+  getBreakerOutcomeLabel,
+  getFeederCommandPreviews,
+  getTopologyImpactSummary,
+} from "../topology-utils";
 import type {
   Alarm,
   BreakerCommandRequest,
@@ -18,11 +23,13 @@ import type {
   FeederControlInput,
   FeederTelemetry,
   StationSnapshot,
+  StationTopology,
 } from "../types";
 
 type PanelTab = "status" | "measurements" | "command" | "info";
 
 interface SelectedObjectPanelProps {
+  topology: StationTopology | null;
   snapshot: StationSnapshot | null;
   alarms: Alarm[];
   controls: FeederControlInput[];
@@ -63,7 +70,30 @@ function MetricRow({ label, value, accent = false }: { label: string; value: str
   );
 }
 
+function RouteSummary({ pathIds }: { pathIds: string[] }) {
+  return (
+    <div className="topology-route" aria-label="Forsyningsvei">
+      {pathIds.map((pathId, index) => (
+        <div key={`${pathId}-${index}`} className="topology-route-fragment">
+          {index > 0 ? <span className="route-arrow">→</span> : null}
+          <span className="topology-node">{pathId}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ImpactStat({ label, value, accent = false }: { label: string; value: string; accent?: boolean }) {
+  return (
+    <div className="impact-stat">
+      <span>{label}</span>
+      <strong className={accent ? "accent-value" : ""}>{value}</strong>
+    </div>
+  );
+}
+
 export function SelectedObjectPanel({
+  topology,
   snapshot,
   alarms,
   controls,
@@ -101,6 +131,7 @@ export function SelectedObjectPanel({
     const transformer = snapshot.transformer;
     const relatedAlarms = sortAlarms(getObjectAlarms(alarms, "T1"));
     const activeTransformerAlarm = relatedAlarms[0] ?? null;
+    const impactSummary = getTopologyImpactSummary(topology, snapshot, "T1");
 
     return (
       <section className="panel scada-panel object-panel">
@@ -153,6 +184,28 @@ export function SelectedObjectPanel({
             </>
           ) : null}
         </div>
+
+        {impactSummary ? (
+          <>
+            <div className="subpanel">
+              <h3>Forsyningsvei</h3>
+              <RouteSummary pathIds={impactSummary.pathIds} />
+            </div>
+
+            <div className="subpanel">
+              <h3>Nettkonsekvens</h3>
+              <div className="impact-grid">
+                <ImpactStat label="Nedstrøms kunder" value={formatValue(impactSummary.totalCustomers)} accent />
+                <ImpactStat label="Kritiske kunder" value={formatValue(impactSummary.criticalCustomers)} />
+                <ImpactStat label="Feedere inne" value={formatValue(impactSummary.energizedFeederCount)} />
+                <ImpactStat label="Feedere ute" value={formatValue(impactSummary.deenergizedFeederCount)} />
+              </div>
+              <p className="impact-note">
+                Område: {impactSummary.downstreamFeederIds.join(", ") || "Ingen nedstrøms grener"}.
+              </p>
+            </div>
+          </>
+        ) : null}
       </section>
     );
   }
@@ -167,12 +220,14 @@ export function SelectedObjectPanel({
   const relatedCommand = lastCommandResult?.objectId === selectedFeeder.id ? lastCommandResult : null;
   const control = controls.find((item) => item.id === selectedFeeder.id);
   const activeUnacknowledgedAlarms = relatedAlarms.filter((alarm) => alarm.state !== "acknowledged");
+  const impactSummary = getTopologyImpactSummary(topology, snapshot, selectedFeeder.id);
+  const commandPreviews = getFeederCommandPreviews(selectedFeeder, snapshot);
   const liveInterlocks: string[] = [];
 
-  if (selectedFeeder.quality !== "good") {
-    liveInterlocks.push(`Datakvalitet er ${getQualityLabel(selectedFeeder.quality).toLowerCase()}.`);
+  if (feeder.quality !== "good") {
+    liveInterlocks.push(`Datakvalitet er ${getQualityLabel(feeder.quality).toLowerCase()}.`);
   }
-  if (selectedFeeder.breakerStatus === "tripped") {
+  if (feeder.breakerStatus === "tripped") {
     liveInterlocks.push("Bryteren er utløst og krever konservativ gjeninnkobling.");
   }
   if (control && control.faultMode !== "normal" && control.faultMode !== "planned_outage") {
@@ -216,7 +271,11 @@ export function SelectedObjectPanel({
             {feeder.id} - {feeder.name}
           </h2>
         </div>
-        <span className={`state-pill tone-${feeder.breakerStatus === "closed" ? "good" : feeder.breakerStatus === "open" ? "warn" : "critical"}`}>
+        <span
+          className={`state-pill tone-${
+            feeder.breakerStatus === "closed" ? "good" : feeder.breakerStatus === "open" ? "warn" : "critical"
+          }`}
+        >
           {getBreakerStatusLabel(feeder.breakerStatus)}
         </span>
       </div>
@@ -245,10 +304,7 @@ export function SelectedObjectPanel({
             <MetricRow label="Kunder tilknyttet" value={formatValue(feeder.customers)} />
             <MetricRow label="Kritiske kunder" value={formatValue(feeder.criticalCustomers)} />
             <MetricRow label="Siste endring" value={formatTime(feeder.timestamp)} />
-            <MetricRow
-              label="Siste hendelse"
-              value={relatedAlarms[0] ? relatedAlarms[0].title : "Ingen aktive alarmer"}
-            />
+            <MetricRow label="Siste hendelse" value={relatedAlarms[0] ? relatedAlarms[0].title : "Ingen aktive alarmer"} />
           </>
         ) : null}
 
@@ -289,6 +345,18 @@ export function SelectedObjectPanel({
                 <p>{relatedCommand.message}</p>
               </div>
             ) : null}
+            <div className="command-preview-grid">
+              <div className={`command-preview-card tone-${commandPreviews.open.tone}`}>
+                <span>{commandPreviews.open.title}</span>
+                <strong>{commandPreviews.open.headline}</strong>
+                <p>{commandPreviews.open.detail}</p>
+              </div>
+              <div className={`command-preview-card tone-${commandPreviews.close.tone}`}>
+                <span>{commandPreviews.close.title}</span>
+                <strong>{commandPreviews.close.headline}</strong>
+                <p>{commandPreviews.close.detail}</p>
+              </div>
+            </div>
           </>
         ) : null}
 
@@ -304,6 +372,29 @@ export function SelectedObjectPanel({
           </>
         ) : null}
       </div>
+
+      {impactSummary ? (
+        <>
+          <div className="subpanel">
+            <h3>Forsyningsvei</h3>
+            <RouteSummary pathIds={impactSummary.pathIds} />
+          </div>
+
+          <div className="subpanel">
+            <h3>Nettkonsekvens</h3>
+            <div className="impact-grid">
+              <ImpactStat label="Kunder på gren" value={formatValue(impactSummary.totalCustomers)} accent />
+              <ImpactStat label="Kritiske kunder" value={formatValue(impactSummary.criticalCustomers)} />
+              <ImpactStat label="Forsyningsstatus" value={getBreakerOutcomeLabel(feeder.breakerStatus)} />
+              <ImpactStat label="Kunder ute nå" value={formatValue(impactSummary.disconnectedCustomers)} />
+            </div>
+            <p className="impact-note">
+              Ved utkobling på denne grenen påvirkes {feeder.id}. Oppstrøms forsyning er{" "}
+              {impactSummary.upstreamSupplyAvailable ? "tilgjengelig" : "ikke tilgjengelig"}.
+            </p>
+          </div>
+        </>
+      ) : null}
 
       <div className="subpanel">
         <h3>Operatørhandlinger</h3>

@@ -20,6 +20,21 @@ interface SingleLineDiagramProps {
 }
 
 type SymbolTone = "good" | "neutral" | "critical" | "high" | "medium" | "warn" | "low";
+type RouteState = "energized" | "open" | "tripped";
+
+function getRouteState(status: BreakerStatus): RouteState {
+  if (status === "closed") {
+    return "energized";
+  }
+  return status;
+}
+
+function getTransformerRouteState(snapshot: StationSnapshot): RouteState {
+  if (snapshot.transformer.quality === "lost" || snapshot.transformer.quality === "invalid") {
+    return "open";
+  }
+  return snapshot.transformer.secondaryVoltageV > 40 ? "energized" : "open";
+}
 
 function DiagramMetric({ label, value }: { label: string; value: string }) {
   return (
@@ -47,17 +62,34 @@ function DiagramLegendItem({
   );
 }
 
+function DiagramPort({
+  side,
+  tone,
+  state,
+  selected = false,
+}: {
+  side: "left" | "right" | "bottom";
+  tone: SymbolTone;
+  state: RouteState;
+  selected?: boolean;
+}) {
+  return <span className={`diagram-port port-${side} tone-${tone} state-${state} ${selected ? "route-selected" : ""}`} aria-hidden="true" />;
+}
+
 function DiagramLinkAssembly({
   label,
   tone,
   status,
+  selected = false,
 }: {
   label: string;
   tone: SymbolTone;
   status: BreakerStatus;
+  selected?: boolean;
 }) {
+  const routeState = getRouteState(status);
   return (
-    <div className={`diagram-link-track tone-${tone}`}>
+    <div className={`diagram-link-track tone-${tone} state-${routeState} ${selected ? "route-selected" : ""}`}>
       <span className="diagram-link-label">{label}</span>
       <div className="diagram-link-rail">
         <span className="diagram-link-run" />
@@ -132,22 +164,36 @@ function FeederCard({
   feeder,
   alarm,
   selected,
+  dimmed,
   showNames,
   showValues,
+  busEnergized,
+  pathSelected,
   onSelect,
 }: {
   feeder: FeederTelemetry;
   alarm: Alarm | null;
   selected: boolean;
+  dimmed: boolean;
   showNames: boolean;
   showValues: boolean;
+  busEnergized: boolean;
+  pathSelected: boolean;
   onSelect: () => void;
 }) {
   const tone = getFeederStateTone(feeder, alarm) as SymbolTone;
   const stateLabel = getFeederStateLabel(feeder, alarm);
+  const upperRouteState: RouteState = busEnergized ? "energized" : "open";
+  const lowerRouteState: RouteState = busEnergized ? getRouteState(feeder.breakerStatus) : "open";
 
   return (
-    <div className={`feeder-column status-${feeder.breakerStatus} tone-${tone}`}>
+    <div
+      className={`feeder-column status-${feeder.breakerStatus} tone-${tone} upper-state-${upperRouteState} lower-state-${lowerRouteState} ${
+        pathSelected ? "route-selected" : ""
+      } ${
+        dimmed ? "route-dimmed" : ""
+      }`}
+    >
       <div className="feeder-branch-graphic">
         <div className="feeder-tap-cap" />
         <div className="feeder-branch-line feeder-branch-upper" />
@@ -228,6 +274,13 @@ export function SingleLineDiagram({
   const reactiveMvar =
     Math.sqrt(Math.max(snapshot.transformer.apparentPowerKva ** 2 - snapshot.transformer.activePowerKw ** 2, 0)) / 1000;
   const inletBreakerStatus: BreakerStatus = "closed";
+  const supplyRouteState = getRouteState(inletBreakerStatus);
+  const transformerRouteState = getTransformerRouteState(snapshot);
+  const supplyTone: SymbolTone = snapshot.transformer.quality === "good" ? "good" : "neutral";
+  const pathSelectionActive = selectedAssetId === "T1" || snapshot.feeders.some((feeder) => feeder.id === selectedAssetId);
+  const selectedFeederId = snapshot.feeders.some((feeder) => feeder.id === selectedAssetId) ? selectedAssetId : null;
+  const busSelected = pathSelectionActive;
+  const busEnergized = transformerRouteState === "energized";
 
   return (
     <section className="panel scada-panel panel-diagram">
@@ -260,7 +313,8 @@ export function SingleLineDiagram({
 
       <div className={`diagram-stage ${autoLayout ? "auto-layout" : "manual-layout"}`}>
         <div className="diagram-top-row">
-          <section className="diagram-card inlet-card">
+          <section className="diagram-card inlet-card route-port-host">
+            <DiagramPort side="right" tone={supplyTone} state={supplyRouteState} selected={pathSelectionActive} />
             <div className="diagram-card-header">
               <strong>NETTINNTAK</strong>
             </div>
@@ -283,16 +337,18 @@ export function SingleLineDiagram({
           </section>
 
           <div className="diagram-link">
-            <DiagramLinkAssembly label="BRK-IN" tone="good" status={inletBreakerStatus} />
+            <DiagramLinkAssembly label="BRK-IN" tone={supplyTone} status={inletBreakerStatus} selected={pathSelectionActive} />
           </div>
 
           <button
             type="button"
-            className={`diagram-card transformer-card ${selectedAssetId === "T1" ? "selected" : ""} ${
+            className={`diagram-card transformer-card route-port-host ${selectedAssetId === "T1" ? "selected" : ""} ${
               transformerAlarm ? `tone-${transformerAlarm.severity}` : ""
             }`}
             onClick={() => onSelect("T1")}
           >
+            <DiagramPort side="left" tone={supplyTone} state={supplyRouteState} selected={pathSelectionActive} />
+            <DiagramPort side="bottom" tone={supplyTone} state={transformerRouteState} selected={pathSelectionActive} />
             <div className="diagram-card-header">
               <div className="transformer-heading">
                 <img className="transformer-mark" src="/assets/transformer-mark.svg" alt="" aria-hidden="true" />
@@ -311,27 +367,26 @@ export function SingleLineDiagram({
           </button>
         </div>
 
-        <div className="transformer-feed-assembly">
-          <div className={`transformer-feed-cap tone-${transformerTone}`} />
-          <div className={`transformer-feed-line tone-${transformerTone}`} />
-          <BreakerSymbol status="closed" tone={transformerTone} orientation="vertical" label="LV-BRK" />
-          <div className={`transformer-feed-line tone-${transformerTone}`} />
-          <div className={`transformer-feed-cap tone-${transformerTone}`} />
-        </div>
-
-        <div className="bus-wrapper">
-          <span className="bus-label">0.4 kV samleskinne</span>
-          <div className="bus-line" />
-          <div className="bus-tap-grid" aria-hidden="true">
-            {snapshot.feeders.map((feeder) => {
-              const feederAlarm = getStrongestAlarm(alarms, feeder.id);
-              const tone = getFeederStateTone(feeder, feederAlarm);
-              return <span key={feeder.id} className={`bus-tap tone-${tone} status-${feeder.breakerStatus}`} />;
-            })}
+        <div className="diagram-transformer-row">
+          <div
+            className={`transformer-feed-assembly tone-${supplyTone} state-${transformerRouteState} ${
+              pathSelectionActive ? "route-selected" : ""
+            }`}
+          >
+            <div className={`transformer-feed-cap tone-${supplyTone}`} />
+            <div className={`transformer-feed-line tone-${supplyTone}`} />
+            <BreakerSymbol status="closed" tone={supplyTone} orientation="vertical" label="LV-BRK" />
+            <div className={`transformer-feed-line tone-${supplyTone}`} />
+            <div className={`transformer-feed-cap tone-${supplyTone}`} />
           </div>
         </div>
 
-        <div className="feeder-grid">
+        <div className={`bus-wrapper tone-${supplyTone} state-${transformerRouteState} ${busSelected ? "route-selected" : ""}`}>
+          <span className="bus-label">0.4 kV samleskinne</span>
+          <div className="bus-line" />
+        </div>
+
+        <div className={`feeder-grid ${selectedFeederId ? "has-route-selection" : ""}`}>
           {snapshot.feeders.map((feeder) => {
             const feederAlarm = getStrongestAlarm(alarms, feeder.id);
             const selected = selectedAssetId === feeder.id;
@@ -345,8 +400,11 @@ export function SingleLineDiagram({
                 }}
                 alarm={feederAlarm}
                 selected={selected}
+                dimmed={selectedFeederId !== null && selectedFeederId !== feeder.id}
                 showNames={showNames}
                 showValues={showValues}
+                busEnergized={busEnergized}
+                pathSelected={selected}
                 onSelect={() => onSelect(feeder.id)}
               />
             );

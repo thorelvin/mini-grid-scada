@@ -150,6 +150,7 @@ export default function App() {
 
         <aside className="right-column">
           <SelectedObjectPanel
+            topology={deferredDashboard?.topology ?? null}
             snapshot={deferredDashboard?.snapshot ?? null}
             alarms={deferredDashboard?.activeAlarms ?? []}
             controls={deferredDashboard?.controls ?? []}
