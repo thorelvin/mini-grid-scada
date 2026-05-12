@@ -312,7 +312,7 @@ export function SelectedObjectPanel({
             Åpne bryter
           </button>
           <button type="button" className="secondary-button" disabled={busy} onClick={() => void handleCloseBreaker()}>
-            Lukke bryter
+            Lukk bryter
           </button>
         </div>
         <div className="command-row single">

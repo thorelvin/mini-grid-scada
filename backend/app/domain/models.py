@@ -97,6 +97,29 @@ class ScenarioSummary(DomainModel):
     description: str
 
 
+class NormalProfileSummary(DomainModel):
+    id: str
+    name: str
+    description: str
+    cycleMinutes: int
+
+
+class TimedEventSummary(DomainModel):
+    id: str
+    name: str
+    description: str
+    durationSec: int
+
+
+class ActiveTimedEvent(DomainModel):
+    id: str
+    name: str
+    description: str
+    durationSec: int
+    startedAt: str
+    endsAt: str
+
+
 class FeederTelemetry(DomainModel):
     id: str
     name: str
@@ -230,6 +253,11 @@ class DashboardPayload(DomainModel):
     controls: list[FeederControlInput]
     simulatorSettings: SimulatorSettings
     availableScenarios: list[ScenarioSummary]
+    availableProfiles: list[NormalProfileSummary] = Field(default_factory=list)
+    availableTimedEvents: list[TimedEventSummary] = Field(default_factory=list)
+    activeProfileId: str | None = None
+    activeProfileStartedAt: str | None = None
+    activeTimedEvents: list[ActiveTimedEvent] = Field(default_factory=list)
     activeScenarioId: str | None = None
     activeScenarioStartedAt: str | None = None
     systemStartedAt: str

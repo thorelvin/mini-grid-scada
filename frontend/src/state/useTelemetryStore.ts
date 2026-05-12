@@ -3,7 +3,9 @@ import { startTransition, useEffect, useState } from "react";
 import {
   acknowledgeAlarm,
   acknowledgeAlarms,
+  activateProfile,
   activateScenario,
+  activateTimedEvent,
   closeBreaker,
   connectDashboard,
   getDashboard,
@@ -123,6 +125,26 @@ export function useTelemetryStore() {
     }
   }
 
+  async function runProfile(profileId: string) {
+    setIsPending(true);
+    try {
+      const next = await activateProfile(profileId);
+      startTransition(() => setDashboard(next));
+    } finally {
+      setIsPending(false);
+    }
+  }
+
+  async function runTimedEvent(eventId: string) {
+    setIsPending(true);
+    try {
+      const next = await activateTimedEvent(eventId);
+      startTransition(() => setDashboard(next));
+    } finally {
+      setIsPending(false);
+    }
+  }
+
   async function resetToNormal() {
     setIsPending(true);
     try {
@@ -185,6 +207,8 @@ export function useTelemetryStore() {
     patchFeederControl,
     patchSimulatorSettings,
     runScenario,
+    runProfile,
+    runTimedEvent,
     resetToNormal,
     executeOpenBreaker,
     executeCloseBreaker,

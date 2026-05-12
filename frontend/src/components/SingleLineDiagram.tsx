@@ -47,6 +47,27 @@ function DiagramLegendItem({
   );
 }
 
+function DiagramLinkAssembly({
+  label,
+  tone,
+  status,
+}: {
+  label: string;
+  tone: SymbolTone;
+  status: BreakerStatus;
+}) {
+  return (
+    <div className={`diagram-link-track tone-${tone}`}>
+      <span className="diagram-link-label">{label}</span>
+      <div className="diagram-link-rail">
+        <span className="diagram-link-run" />
+        <BreakerSymbol status={status} tone={tone} orientation="horizontal" />
+        <span className="diagram-link-run" />
+      </div>
+    </div>
+  );
+}
+
 function BreakerSymbol({
   status,
   tone,
@@ -262,7 +283,7 @@ export function SingleLineDiagram({
           </section>
 
           <div className="diagram-link">
-            <BreakerSymbol status={inletBreakerStatus} tone="good" orientation="horizontal" label="BRK-IN" />
+            <DiagramLinkAssembly label="BRK-IN" tone="good" status={inletBreakerStatus} />
           </div>
 
           <button

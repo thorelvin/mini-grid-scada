@@ -45,6 +45,7 @@ class SimulatorService:
             await asyncio.sleep(settings.update_interval_sec)
 
     async def _produce_frame(self) -> None:
+        await self._app_state.advance_dynamic_state()
         controls = await self._app_state.get_controls()
         simulator_settings = await self._app_state.get_simulator_settings()
         snapshot = build_snapshot(
@@ -53,6 +54,7 @@ class SimulatorService:
             controls=controls,
             ambient_temp_c=simulator_settings.ambientTempC,
             nominal_phase_voltage_v=settings.nominal_phase_voltage_v,
+            service_target_phase_voltage_v=settings.service_target_phase_voltage_v,
             nominal_line_voltage_v=settings.nominal_line_voltage_v,
             transformer_rating_kva=settings.transformer_rating_kva,
         )

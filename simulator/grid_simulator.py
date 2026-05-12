@@ -18,6 +18,9 @@ from backend.app.domain.models import (
 )
 from simulator.profiles import FEEDER_PROFILES
 
+SERVICE_VOLTAGE_DROP_AT_FULL_LOAD_V = 10.0
+VOLTAGE_IMBALANCE_SPREAD_FACTOR = 0.28
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -83,8 +86,8 @@ def _bounded(value: float, minimum: float, maximum: float) -> float:
     return max(minimum, min(maximum, value))
 
 
-def _phase_values(mean_value: float, imbalance_percent: float, invert: bool = False) -> PhaseValues:
-    spread = mean_value * (imbalance_percent / 100.0) * (0.75 if invert else 1.0)
+def _phase_values(mean_value: float, imbalance_percent: float, spread_factor: float = 1.0) -> PhaseValues:
+    spread = mean_value * (imbalance_percent / 100.0) * spread_factor
     return PhaseValues(
         l1=round(max(0.0, mean_value + spread), 1),
         l2=round(max(0.0, mean_value), 1),
@@ -97,10 +100,14 @@ def _build_feeder_telemetry(
     timestamp: str,
     nominal_phase_voltage_v: float,
     nominal_line_voltage_v: float,
+    service_target_phase_voltage_v: float | None = None,
 ) -> FeederTelemetry:
     profile = FEEDER_PROFILES[control.id]
     quality = _quality_from_control(control)
     breaker_status = control.breakerStatus
+    last_trip_reason: str | None = None
+    last_trip_at: str | None = None
+    service_target = service_target_phase_voltage_v if service_target_phase_voltage_v is not None else nominal_phase_voltage_v + 2.0
 
     load_kw = control.loadKw
     reactive_kvar = control.reactivePowerKvar
@@ -118,6 +125,14 @@ def _build_feeder_telemetry(
     net_kw = load_kw - solar_kw
     apparent_kva = sqrt((net_kw**2) + (reactive_kvar**2))
     mean_current = (apparent_kva * 1000) / max(sqrt(3) * nominal_line_voltage_v, 1.0)
+    potential_current = _phase_values(mean_current, control.phaseImbalancePercent)
+    potential_max_current = max(potential_current.l1, potential_current.l2, potential_current.l3)
+    potential_utilization = (potential_max_current / profile["ratingA"]) * 100 if profile["ratingA"] else 0.0
+
+    if breaker_status == BreakerStatus.CLOSED and potential_utilization >= profile["tripPercent"]:
+        breaker_status = BreakerStatus.TRIPPED
+        last_trip_reason = "overload"
+        last_trip_at = timestamp
 
     if breaker_status != BreakerStatus.CLOSED:
         net_kw = 0.0
@@ -127,13 +142,22 @@ def _build_feeder_telemetry(
     else:
         load_pressure = max(net_kw, 0.0) / max(load_kw + 1.0, 1.0)
         solar_lift = max(solar_kw - load_kw, 0.0) / max(profile["ratingA"], 1.0)
-        base_voltage = nominal_phase_voltage_v - (mean_current / profile["ratingA"]) * 16.0 + (solar_lift * 4.0)
+        base_voltage = service_target - (mean_current / profile["ratingA"]) * SERVICE_VOLTAGE_DROP_AT_FULL_LOAD_V + (solar_lift * 4.0)
         base_voltage = _bounded(base_voltage, 188.0, 260.0)
-        voltage = _phase_values(base_voltage, control.phaseImbalancePercent / max(load_pressure, 0.35), invert=True)
+        voltage = _phase_values(
+            base_voltage,
+            control.phaseImbalancePercent / max(load_pressure, 0.35),
+            spread_factor=VOLTAGE_IMBALANCE_SPREAD_FACTOR,
+        )
 
     current = _phase_values(mean_current, control.phaseImbalancePercent)
     max_current = max(current.l1, current.l2, current.l3)
     utilization = (max_current / profile["ratingA"]) * 100 if profile["ratingA"] else 0.0
+    display_utilization = utilization
+    if breaker_status != BreakerStatus.CLOSED:
+        display_utilization = (
+            potential_utilization if control.faultMode == FaultMode.OVERLOAD or last_trip_reason == "overload" else 0.0
+        )
     avg_voltage = (voltage.l1 + voltage.l2 + voltage.l3) / 3 if breaker_status == BreakerStatus.CLOSED else 0.0
     voltage_deviation = ((nominal_phase_voltage_v - avg_voltage) / nominal_phase_voltage_v) * 100 if avg_voltage else 100.0
 
@@ -142,8 +166,12 @@ def _build_feeder_telemetry(
         warningPercent=profile["warningPercent"],
         tripPercent=profile["tripPercent"],
         tripDelaySec=profile["tripDelaySec"],
-        lastTripReason="forced_trip" if control.faultMode == FaultMode.FORCED_TRIP else None,
-        lastTripAt=timestamp if control.faultMode == FaultMode.FORCED_TRIP else None,
+        lastTripReason=(
+            last_trip_reason if last_trip_reason is not None else "forced_trip" if control.faultMode == FaultMode.FORCED_TRIP else None
+        ),
+        lastTripAt=(
+            last_trip_at if last_trip_at is not None else timestamp if control.faultMode == FaultMode.FORCED_TRIP else None
+        ),
     )
 
     return FeederTelemetry(
@@ -161,7 +189,7 @@ def _build_feeder_telemetry(
         quality=quality,
         protection=protection,
         derived=DerivedMetrics(
-            utilizationPercent=round(utilization, 1),
+            utilizationPercent=round(display_utilization, 1),
             phaseImbalancePercent=round(control.phaseImbalancePercent, 1),
             voltageDeviationPercent=round(voltage_deviation, 1),
             powerDirection=_power_direction(net_kw),
@@ -178,6 +206,7 @@ def build_snapshot(
     nominal_phase_voltage_v: float,
     nominal_line_voltage_v: float,
     transformer_rating_kva: float,
+    service_target_phase_voltage_v: float | None = None,
 ) -> StationSnapshot:
     timestamp = _now_iso()
     feeders = [
@@ -186,6 +215,7 @@ def build_snapshot(
             timestamp=timestamp,
             nominal_phase_voltage_v=nominal_phase_voltage_v,
             nominal_line_voltage_v=nominal_line_voltage_v,
+            service_target_phase_voltage_v=service_target_phase_voltage_v,
         )
         for control in controls
     ]

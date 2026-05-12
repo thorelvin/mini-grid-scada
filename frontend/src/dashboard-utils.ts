@@ -304,8 +304,21 @@ export function getLiveWindowLabel(seriesCollection: TrendSeries[]): string {
   if (timestamps.length < 2) {
     return "LIVE";
   }
-  const minutes = Math.max(1, Math.round((Math.max(...timestamps) - Math.min(...timestamps)) / 60000));
-  return `${minutes}m live`;
+  const totalMinutes = Math.max(1, Math.round((Math.max(...timestamps) - Math.min(...timestamps)) / 60000));
+  if (totalMinutes < 60) {
+    return `${totalMinutes} min live`;
+  }
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes > 0 ? `${hours} t ${minutes} min live` : `${hours} t live`;
+}
+
+export function formatTrendWindowLabel(windowSec: number): string {
+  if (windowSec < 3600) {
+    return `${Math.round(windowSec / 60)} min`;
+  }
+  const hours = windowSec / 3600;
+  return Number.isInteger(hours) ? `${hours} t` : `${hours.toFixed(1).replace(".", ",")} t`;
 }
 
 export function getTrendBounds(seriesCollection: TrendSeries[]): { min: number; max: number } {

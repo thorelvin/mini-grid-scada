@@ -14,6 +14,8 @@ Current direction:
 - `React + Vite + TypeScript` frontend for the operator GUI
 - `Python` simulator for feeder load, solar export, power quality and scenario injection
 - `WebSocket` dashboard updates with polling fallback
+- `Normal profiles` plus timed event overlays for realistic feeder behavior over time
+- `Independent trend windows` per chart through a dedicated trends API
 - `MQTT` kept as a later architecture step, not an MVP dependency
 
 ## What Works Now
@@ -25,9 +27,11 @@ The repository already contains a functional end-to-end demo skeleton:
 - single-line diagram with breaker states, transformer feed and feeder cards
 - active alarms, event log and selected-object panel
 - scenario controls for EV peak, phase imbalance, comms loss, breaker trip and high solar
+- continuous normal profiles such as weekday, winter weekday and weekend
+- timed operating events such as EV rush, school start and cloud cover
 - manual feeder controls for load, reactive power, breaker state, quality and solar
 - interlocked open/close breaker commands
-- trend charts for voltage, current and transformer load
+- trend charts for voltage, current and transformer load with per-chart time windows
 - report export from the frontend
 - backend tests for alarms, scenarios and command behavior
 
@@ -62,10 +66,13 @@ Start the API:
 Useful endpoints:
 
 - `GET http://127.0.0.1:8000/api/dashboard`
+- `GET http://127.0.0.1:8000/api/trends`
 - `GET http://127.0.0.1:8000/api/topology`
 - `GET http://127.0.0.1:8000/api/alarms/active`
 - `POST http://127.0.0.1:8000/api/commands/open-breaker`
 - `POST http://127.0.0.1:8000/api/commands/close-breaker`
+- `POST http://127.0.0.1:8000/api/simulator/profiles/weekday/activate`
+- `POST http://127.0.0.1:8000/api/simulator/events/ev_rush_10m/activate`
 - `POST http://127.0.0.1:8000/api/simulator/scenarios/ev_peak/activate`
 - `POST http://127.0.0.1:8000/api/simulator/reset`
 
@@ -84,6 +91,13 @@ Start the dev server:
 npm run dev
 ```
 
+If you want the frontend to target a different backend port during local testing:
+
+```powershell
+$env:VITE_API_BASE = "http://127.0.0.1:8001"
+npm run dev
+```
+
 The frontend runs on:
 
 - `http://127.0.0.1:5173/`
@@ -98,14 +112,23 @@ Current command handling is intentionally conservative:
 
 Scenario handling supports both quick fault injection and return to baseline:
 
+- choose a continuous normal profile as the live baseline
+- layer timed operating events on top of the active profile
 - activate a named scenario from the simulator panel
 - return to nominal operation with `Til normaltilstand`
 - keep trends and event history visible while scenarios run
+
+Trend handling is intentionally separate from the live dashboard snapshot:
+
+- the main dashboard payload returns a default recent trend window
+- the frontend can request custom windows per chart through `GET /api/trends`
+- each chart can independently show `5 min`, `15 min`, `30 min`, `1 t`, `3 t` or `6 t`
 
 ## Development Notes
 
 - the backend depends on `websockets` so `/ws/dashboard` stays live instead of falling back to polling
 - the frontend is designed to stay lightweight and responsive even while trends and alarms update continuously
+- trend history is downsampled in the backend so longer windows stay responsive
 - SVG-based diagram symbols are used instead of bitmap assets so the single-line view stays sharp and easy to style
 
 ## Verification

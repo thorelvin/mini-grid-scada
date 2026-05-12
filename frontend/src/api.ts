@@ -2,13 +2,15 @@ import type {
   BreakerCommandRequest,
   CommandResult,
   ConnectionStatus,
+  DashboardTrends,
   DashboardPayload,
   FeederControlInput,
   SimulatorSettings,
 } from "./types";
 
-const apiBase = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
-const wsBase = apiBase.replace(/^http/i, "ws");
+const apiBase = (import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000")
+  .trim()
+  .replace(/\/+$/, "");
 
 async function fetchJson<T>(input: string, init?: RequestInit): Promise<T> {
   const response = await fetch(input, init);
@@ -20,6 +22,25 @@ async function fetchJson<T>(input: string, init?: RequestInit): Promise<T> {
 
 export function getDashboard(): Promise<DashboardPayload> {
   return fetchJson<DashboardPayload>(`${apiBase}/api/dashboard`);
+}
+
+export function getTrends(params?: {
+  voltageWindowSec?: number;
+  currentWindowSec?: number;
+  transformerWindowSec?: number;
+}): Promise<DashboardTrends> {
+  const searchParams = new URLSearchParams();
+  if (params?.voltageWindowSec) {
+    searchParams.set("voltage_window_sec", String(params.voltageWindowSec));
+  }
+  if (params?.currentWindowSec) {
+    searchParams.set("current_window_sec", String(params.currentWindowSec));
+  }
+  if (params?.transformerWindowSec) {
+    searchParams.set("transformer_window_sec", String(params.transformerWindowSec));
+  }
+  const query = searchParams.toString();
+  return fetchJson<DashboardTrends>(`${apiBase}/api/trends${query ? `?${query}` : ""}`);
 }
 
 export function updateFeederControls(
@@ -45,6 +66,18 @@ export function updateSimulatorSettings(
 
 export function activateScenario(scenarioId: string): Promise<DashboardPayload> {
   return fetchJson<DashboardPayload>(`${apiBase}/api/simulator/scenarios/${scenarioId}/activate`, {
+    method: "POST",
+  });
+}
+
+export function activateProfile(profileId: string): Promise<DashboardPayload> {
+  return fetchJson<DashboardPayload>(`${apiBase}/api/simulator/profiles/${profileId}/activate`, {
+    method: "POST",
+  });
+}
+
+export function activateTimedEvent(eventId: string): Promise<DashboardPayload> {
+  return fetchJson<DashboardPayload>(`${apiBase}/api/simulator/events/${eventId}/activate`, {
     method: "POST",
   });
 }
@@ -89,7 +122,9 @@ export function connectDashboard(
   onStatus: (status: ConnectionStatus) => void,
   onError: (message: string) => void,
 ): () => void {
-  const socket = new WebSocket(`${wsBase}/ws/dashboard`);
+  const socketUrl = new URL("/ws/dashboard", `${apiBase}/`);
+  socketUrl.protocol = socketUrl.protocol === "https:" ? "wss:" : "ws:";
+  const socket = new WebSocket(socketUrl.toString());
   onStatus("connecting");
 
   socket.addEventListener("open", () => onStatus("live"));

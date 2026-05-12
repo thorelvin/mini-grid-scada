@@ -23,7 +23,21 @@ function FooterStat({ label, value, accent = false }: { label: string; value: st
 }
 
 export function StatusFooter({ dashboard, connectionStatus, onExportReport }: StatusFooterProps) {
-  const scenarioUptimeBase = dashboard?.activeScenarioStartedAt ?? dashboard?.systemStartedAt ?? null;
+  const operatingUptimeBase =
+    dashboard?.activeTimedEvents[0]?.startedAt ??
+    dashboard?.activeScenarioStartedAt ??
+    dashboard?.activeProfileStartedAt ??
+    dashboard?.systemStartedAt ??
+    null;
+  const profileName =
+    dashboard?.availableProfiles.find((profile) => profile.id === dashboard.activeProfileId)?.name ??
+    dashboard?.activeProfileId ??
+    "manuell";
+  const operatingState = dashboard?.activeTimedEvents.length
+    ? `${profileName} + ${dashboard.activeTimedEvents.length} hend.`
+    : dashboard?.activeScenarioId
+      ? `${profileName} + feil`
+      : profileName;
 
   return (
     <footer className="status-footer">
@@ -43,8 +57,8 @@ export function StatusFooter({ dashboard, connectionStatus, onExportReport }: St
           label="Kvitterte alarmer"
           value={String(getAcknowledgedCount(dashboard?.activeAlarms ?? []))}
         />
-        <FooterStat label="Scenario" value={dashboard?.activeScenarioId ?? "normal"} />
-        <FooterStat label="Gående tid" value={formatElapsed(scenarioUptimeBase)} />
+        <FooterStat label="Driftsmodus" value={operatingState} />
+        <FooterStat label="Gående tid" value={formatElapsed(operatingUptimeBase)} />
       </div>
 
       <button type="button" className="secondary-button footer-action" onClick={onExportReport} disabled={!dashboard}>

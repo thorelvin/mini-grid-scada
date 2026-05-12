@@ -1,8 +1,9 @@
 import asyncio
 
-from backend.app.domain.models import ScenarioSummary
+from backend.app.domain.models import NormalProfileSummary, ScenarioSummary, TimedEventSummary
 from backend.app.services.alarm_service import evaluate_snapshot
 from backend.app.services.app_state import AppState
+from simulator.dynamics import DEFAULT_PROFILE_ID, list_profiles, list_timed_events
 from simulator.grid_simulator import build_demo_topology, build_snapshot, create_default_controls
 from simulator.scenarios import list_scenarios
 
@@ -12,6 +13,9 @@ def _build_state() -> AppState:
         topology=build_demo_topology("NST-001"),
         controls=create_default_controls(),
         available_scenarios=[ScenarioSummary(**scenario) for scenario in list_scenarios()],
+        available_profiles=[NormalProfileSummary(**profile) for profile in list_profiles()],
+        available_timed_events=[TimedEventSummary(**event) for event in list_timed_events()],
+        default_profile_id=DEFAULT_PROFILE_ID,
     )
 
 

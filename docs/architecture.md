@@ -74,6 +74,8 @@ Dette gir lav kompleksitet i startfasen, men beholder en klar grense mellom dome
 Ansvar:
 
 - generere normal drift hvert 2. sekund
+- kjøre kontinuerlige normalprofiler som hverdag, vinterhverdag, helg og overskyet dag
+- legge tidsavgrensede hendelser oppå aktiv profil, for eksempel elbilrush, skolestart og skyfront
 - kjøre scenarioer som EV-peak, faseubalanse, kommunikasjonstap og brytertrip
 - beregne avhengigheter som trafo-last fra feederlast og solproduksjon
 - publisere komplette snapshots, ikke bare enkeltpunkter
@@ -81,6 +83,7 @@ Ansvar:
 Viktig designvalg:
 
 - simulatoren skal eie scenario-tilstand
+- simulatoren skal eie profil- og timed-event-tilstand
 - backend skal eie operasjonell tilstand som alarmer, eventer og interlocks
 
 Direkte styrbare input per feeder i MVP:
@@ -125,6 +128,7 @@ Ansvar:
 - validere snapshot med Pydantic-modeller
 - oppdatere `latest`-tilstand per objekt
 - skrive historikkpunkter for trendvisning
+- eksponere separate trendvinduer uten å blåse opp live dashboard-payloaden
 - kalle alarmmotor og eventtjeneste
 - trigge WebSocket-broadcast til frontend
 
@@ -205,6 +209,7 @@ Ansvar:
 - vise siste telemetri
 - vise aktive alarmer og hendelseslogg
 - vise valgt objekt med faner for status, målinger, beskyttelse, kommando og info
+- la operatøren velge ulike tidsvinduer per trendgraf uten å påvirke resten av dashboardet
 - sende brukerhandlinger til backend
 - vise interlock-meldinger og konsekvens for kommandoer
 
@@ -246,6 +251,8 @@ Arkitekturvalg for å støtte dette:
 - backend sender et kompakt, normalisert dashboard-objekt over WebSocket
 - frontend holder state flat og oppdelt etter visningsbehov, slik at små endringer ikke rerendrer hele siden
 - tunge visninger som trend/replay lastes via egne kall i stedet for å være del av hvert live-snapshot
+- trendhistorikk hentes via eget `GET /api/trends` med valgfritt tidsvindu per graf
+- backend nedskalerer lange tidsserier før de sendes til frontend
 - derived metrics beregnes i backend slik at frontend holder seg lett
 - simulatoren jobber med preberegnede profiler og enkel matematikk, ikke tunge analyser per tick
 - SQLite-skriving for historikk kan batches eller nedsamples hvis oppdateringstakten senere øker
@@ -268,6 +275,9 @@ Følgende modeller bør være sentrale:
 - `InterlockDecision`
 - `ScenarioState`
 - `ScenarioRun`
+- `NormalProfileSummary`
+- `TimedEventSummary`
+- `ActiveTimedEvent`
 - `DerivedMetrics`
 - `SystemHealth`
 
@@ -298,6 +308,7 @@ Normal flyt for hver oppdatering:
 2. Snapshot valideres i telemetry service.
 3. `latest`-tilstand oppdateres for trafo og feeders.
 4. Historikkpunkt skrives for relevante trendserier.
+   Disse skal kunne hentes både som standardvindu i dashboardet og som egne trendvinduer via trend-API.
 5. Alarmmotor evaluerer snapshot mot regler og tidligere tilstand.
 6. Nye hendelser og alarmoverganger skrives til database.
 7. Oppdatert status sendes til frontend via WebSocket.

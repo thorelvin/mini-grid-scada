@@ -70,6 +70,29 @@ export interface ScenarioSummary {
   description: string;
 }
 
+export interface NormalProfileSummary {
+  id: string;
+  name: string;
+  description: string;
+  cycleMinutes: number;
+}
+
+export interface TimedEventSummary {
+  id: string;
+  name: string;
+  description: string;
+  durationSec: number;
+}
+
+export interface ActiveTimedEvent {
+  id: string;
+  name: string;
+  description: string;
+  durationSec: number;
+  startedAt: string;
+  endsAt: string;
+}
+
 export interface FeederTelemetry {
   id: string;
   name: string;
@@ -200,6 +223,11 @@ export interface DashboardPayload {
   controls: FeederControlInput[];
   simulatorSettings: SimulatorSettings;
   availableScenarios: ScenarioSummary[];
+  availableProfiles: NormalProfileSummary[];
+  availableTimedEvents: TimedEventSummary[];
+  activeProfileId?: string | null;
+  activeProfileStartedAt?: string | null;
+  activeTimedEvents: ActiveTimedEvent[];
   activeScenarioId?: string | null;
   activeScenarioStartedAt?: string | null;
   systemStartedAt: string;

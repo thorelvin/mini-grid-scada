@@ -13,6 +13,11 @@ import { useTelemetryStore } from "./state/useTelemetryStore";
 
 function buildReportText(dashboard: NonNullable<ReturnType<typeof useTelemetryStore>["dashboard"]>): string {
   const highestAlarm = getHighestPriorityAlarm(dashboard.activeAlarms);
+  const activeProfileName =
+    dashboard.availableProfiles.find((profile) => profile.id === dashboard.activeProfileId)?.name ??
+    dashboard.activeProfileId ??
+    "Custom";
+  const activeEventNames = dashboard.activeTimedEvents.map((event) => event.name).join(", ");
   const feeders = dashboard.snapshot.feeders
     .map((feeder) =>
       [
@@ -33,7 +38,9 @@ function buildReportText(dashboard: NonNullable<ReturnType<typeof useTelemetrySt
     "",
     `Tidspunkt: ${formatDate(dashboard.snapshot.timestamp)} ${formatTime(dashboard.snapshot.timestamp)}`,
     `Stasjon: ${dashboard.snapshot.stationId}`,
-    `Scenario: ${dashboard.activeScenarioId ?? "normal"}`,
+    `Profil: ${activeProfileName}`,
+    `Aktive hendelser: ${activeEventNames || "Ingen"}`,
+    `Feilscenario: ${dashboard.activeScenarioId ?? "ingen"}`,
     `Forbindelse: ${dashboard.health.apiStatus}`,
     "",
     "## Situasjonsbilde",
@@ -60,6 +67,8 @@ export default function App() {
     patchFeederControl,
     patchSimulatorSettings,
     runScenario,
+    runProfile,
+    runTimedEvent,
     resetToNormal,
     executeOpenBreaker,
     executeCloseBreaker,
@@ -133,7 +142,10 @@ export default function App() {
             selectedAssetId={selectedAssetId}
             onSelect={setSelectedAssetId}
           />
-          <TrendCharts trends={deferredDashboard?.trends ?? null} />
+          <TrendCharts
+            trends={deferredDashboard?.trends ?? null}
+            dashboardTimestamp={deferredDashboard?.snapshot.timestamp ?? null}
+          />
         </section>
 
         <aside className="right-column">
@@ -152,12 +164,19 @@ export default function App() {
             controls={deferredDashboard?.controls ?? []}
             simulatorSettings={deferredDashboard?.simulatorSettings ?? null}
             scenarios={deferredDashboard?.availableScenarios ?? []}
+            profiles={deferredDashboard?.availableProfiles ?? []}
+            timedEvents={deferredDashboard?.availableTimedEvents ?? []}
+            activeProfileId={deferredDashboard?.activeProfileId}
+            activeProfileStartedAt={deferredDashboard?.activeProfileStartedAt ?? null}
+            activeTimedEvents={deferredDashboard?.activeTimedEvents ?? []}
             activeScenarioId={deferredDashboard?.activeScenarioId}
             activeScenarioStartedAt={deferredDashboard?.activeScenarioStartedAt ?? null}
             busy={isPending}
             onApplyControl={patchFeederControl}
             onApplySettings={patchSimulatorSettings}
             onRunScenario={runScenario}
+            onRunProfile={runProfile}
+            onRunTimedEvent={runTimedEvent}
             onReset={resetToNormal}
           />
         </aside>

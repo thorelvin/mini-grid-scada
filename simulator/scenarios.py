@@ -4,15 +4,6 @@ from backend.app.domain.models import FeederControlInput, ScenarioSummary, Simul
 
 
 SCENARIO_LIBRARY: dict[str, dict[str, object]] = {
-    "normal": {
-        "summary": ScenarioSummary(
-            id="normal",
-            name="Normal drift",
-            description="All feeders operate within nominal loading, quality, and breaker limits.",
-        ),
-        "control_patches": {},
-        "settings_patch": {},
-    },
     "ev_peak": {
         "summary": ScenarioSummary(
             id="ev_peak",
@@ -61,7 +52,7 @@ SCENARIO_LIBRARY: dict[str, dict[str, object]] = {
         "summary": ScenarioSummary(
             id="high_solar",
             name="Høy solproduksjon",
-            description="F4 exports strongly and can lift voltage toward an overvoltage condition.",
+            description="F4 eksporterer kraftig og kan løfte spenningen mot en overvolt-tilstand.",
         ),
         "control_patches": {
             "F4": {"solarKw": 180.0, "reactivePowerKvar": -12.0, "phaseImbalancePercent": 5.0},

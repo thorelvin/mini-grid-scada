@@ -13,9 +13,10 @@ from backend.app.api.routes_status import router as status_router
 from backend.app.api.routes_telemetry import router as telemetry_router
 from backend.app.api.ws import router as websocket_router
 from backend.app.config import settings
-from backend.app.domain.models import ScenarioSummary
+from backend.app.domain.models import NormalProfileSummary, ScenarioSummary, TimedEventSummary
 from backend.app.services.app_state import AppState
 from backend.app.services.simulator_service import SimulatorService
+from simulator.dynamics import DEFAULT_PROFILE_ID, list_profiles, list_timed_events
 from simulator.grid_simulator import build_demo_topology, create_default_controls
 from simulator.scenarios import list_scenarios
 
@@ -25,7 +26,16 @@ async def lifespan(app: FastAPI):
     topology = build_demo_topology(settings.station_id)
     controls = create_default_controls()
     available_scenarios = [ScenarioSummary(**scenario) for scenario in list_scenarios()]
-    app_state = AppState(topology=topology, controls=controls, available_scenarios=available_scenarios)
+    available_profiles = [NormalProfileSummary(**profile) for profile in list_profiles()]
+    available_timed_events = [TimedEventSummary(**event) for event in list_timed_events()]
+    app_state = AppState(
+        topology=topology,
+        controls=controls,
+        available_scenarios=available_scenarios,
+        available_profiles=available_profiles,
+        available_timed_events=available_timed_events,
+        default_profile_id=DEFAULT_PROFILE_ID,
+    )
     simulator_service = SimulatorService(app_state)
 
     app.state.app_state = app_state

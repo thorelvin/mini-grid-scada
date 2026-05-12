@@ -1,5 +1,9 @@
+import { useEffect, useState } from "react";
+
+import { getTrends } from "../api";
 import {
   formatTime,
+  formatTrendWindowLabel,
   formatValue,
   getLiveWindowLabel,
   getTrendBounds,
@@ -9,7 +13,15 @@ import type { DashboardTrends, TrendSeries } from "../types";
 
 interface TrendChartsProps {
   trends: DashboardTrends | null;
+  dashboardTimestamp?: string | null;
 }
+
+type TrendMetricKey = keyof DashboardTrends;
+
+type TrendWindowState = Record<TrendMetricKey, number>;
+
+const DEFAULT_TREND_WINDOW_SEC = 15 * 60;
+const TREND_WINDOW_OPTIONS = [5 * 60, 15 * 60, 30 * 60, 60 * 60, 3 * 60 * 60, 6 * 60 * 60];
 
 function buildPath(
   points: TrendSeries["points"],
@@ -50,14 +62,41 @@ function valueToY(
   return height - paddingY - ((value - bounds.min) / Math.max(bounds.max - bounds.min, 0.0001)) * plotHeight;
 }
 
+function TrendWindowSelect({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (nextValue: number) => void;
+}) {
+  return (
+    <label className="trend-window-select">
+      <span>Viser</span>
+      <select value={value} onChange={(event) => onChange(Number(event.target.value))}>
+        {TREND_WINDOW_OPTIONS.map((option) => (
+          <option key={option} value={option}>
+            {formatTrendWindowLabel(option)}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 function LineChartCard({
   title,
   unit,
   seriesCollection,
+  windowSec,
+  onWindowChange,
+  isRefreshing,
 }: {
   title: string;
   unit: string;
   seriesCollection: TrendSeries[];
+  windowSec: number;
+  onWindowChange: (nextWindowSec: number) => void;
+  isRefreshing: boolean;
 }) {
   const width = 360;
   const height = 180;
@@ -81,8 +120,9 @@ function LineChartCard({
       <div className="trend-panel-header">
         <div>
           <strong>{title}</strong>
-          <p>{getLiveWindowLabel(seriesCollection)}</p>
+          <p>{isRefreshing ? "Oppdaterer trendvindu..." : getLiveWindowLabel(seriesCollection)}</p>
         </div>
+        <TrendWindowSelect value={windowSec} onChange={onWindowChange} />
       </div>
 
       <svg viewBox={`0 0 ${width} ${height}`} className="trend-svg" role="img" aria-label={title}>
@@ -157,12 +197,67 @@ function LineChartCard({
   );
 }
 
-export function TrendCharts({ trends }: TrendChartsProps) {
-  const hasTrendPoints =
-    !!trends &&
-    [...trends.voltageL2, ...trends.currentMax, ...trends.transformerLoad].some((series) => series.points.length > 0);
+export function TrendCharts({ trends, dashboardTimestamp }: TrendChartsProps) {
+  const [trendWindows, setTrendWindows] = useState<TrendWindowState>({
+    voltageL2: DEFAULT_TREND_WINDOW_SEC,
+    currentMax: DEFAULT_TREND_WINDOW_SEC,
+    transformerLoad: DEFAULT_TREND_WINDOW_SEC,
+  });
+  const [customTrends, setCustomTrends] = useState<DashboardTrends | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  if (!trends) {
+  const hasCustomWindowSelection = Object.values(trendWindows).some(
+    (windowSec) => windowSec !== DEFAULT_TREND_WINDOW_SEC,
+  );
+
+  useEffect(() => {
+    if (!trends) {
+      return;
+    }
+    if (!hasCustomWindowSelection) {
+      setCustomTrends(null);
+      setIsRefreshing(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsRefreshing(true);
+    void getTrends({
+      voltageWindowSec: trendWindows.voltageL2,
+      currentWindowSec: trendWindows.currentMax,
+      transformerWindowSec: trendWindows.transformerLoad,
+    })
+      .then((nextTrends) => {
+        if (!cancelled) {
+          setCustomTrends(nextTrends);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsRefreshing(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dashboardTimestamp, hasCustomWindowSelection, trendWindows, trends]);
+
+  const activeTrends = hasCustomWindowSelection ? customTrends ?? trends : trends;
+  const hasTrendPoints =
+    !!activeTrends &&
+    [...activeTrends.voltageL2, ...activeTrends.currentMax, ...activeTrends.transformerLoad].some(
+      (series) => series.points.length > 0,
+    );
+
+  function updateWindow(metric: TrendMetricKey, nextWindowSec: number) {
+    setTrendWindows((current) => ({
+      ...current,
+      [metric]: nextWindowSec,
+    }));
+  }
+
+  if (!activeTrends) {
     return (
       <section className="panel scada-panel">
         <div className="panel-header">
@@ -199,9 +294,30 @@ export function TrendCharts({ trends }: TrendChartsProps) {
       </div>
 
       <div className="trend-layout">
-        <LineChartCard title="Spenning L2" unit="V" seriesCollection={trends.voltageL2} />
-        <LineChartCard title="Strøm maks" unit="A" seriesCollection={trends.currentMax} />
-        <LineChartCard title="Trafolast" unit="%" seriesCollection={trends.transformerLoad} />
+        <LineChartCard
+          title="Spenning L2"
+          unit="V"
+          seriesCollection={activeTrends.voltageL2}
+          windowSec={trendWindows.voltageL2}
+          onWindowChange={(nextWindowSec) => updateWindow("voltageL2", nextWindowSec)}
+          isRefreshing={isRefreshing && hasCustomWindowSelection}
+        />
+        <LineChartCard
+          title="Strøm maks"
+          unit="A"
+          seriesCollection={activeTrends.currentMax}
+          windowSec={trendWindows.currentMax}
+          onWindowChange={(nextWindowSec) => updateWindow("currentMax", nextWindowSec)}
+          isRefreshing={isRefreshing && hasCustomWindowSelection}
+        />
+        <LineChartCard
+          title="Trafolast"
+          unit="%"
+          seriesCollection={activeTrends.transformerLoad}
+          windowSec={trendWindows.transformerLoad}
+          onWindowChange={(nextWindowSec) => updateWindow("transformerLoad", nextWindowSec)}
+          isRefreshing={isRefreshing && hasCustomWindowSelection}
+        />
       </div>
     </section>
   );
