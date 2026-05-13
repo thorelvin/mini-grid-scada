@@ -50,7 +50,9 @@ def test_trend_windows_can_be_requested_per_metric():
             transformer_window_sec=60 * 60,
         )
 
+        assert len(trends.voltageL1[0].points) == 2
         assert len(trends.voltageL2[0].points) == 2
+        assert len(trends.voltageL3[0].points) == 2
         assert len(trends.currentMax[0].points) == 4
         assert len(trends.transformerLoad[0].points) == 6
 

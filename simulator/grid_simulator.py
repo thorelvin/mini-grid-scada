@@ -11,6 +11,7 @@ from backend.app.domain.models import (
     FeederTelemetry,
     PhaseValues,
     ProtectionSettings,
+    StationBreakerTelemetry,
     StationSnapshot,
     StationTopology,
     TopologyEdge,
@@ -31,7 +32,8 @@ def build_demo_topology(station_id: str) -> StationTopology:
         Asset(id=station_id, name="Mini Grid SCADA Station", kind=AssetKind.STATION),
         Asset(id="BRK-IN", name="Inntaksbryter", kind=AssetKind.BREAKER, parentId=station_id),
         Asset(id="T1", name="Trafo T1 22/0.4 kV", kind=AssetKind.TRANSFORMER, parentId=station_id),
-        Asset(id="BUS-01", name="0.4 kV samleskinne", kind=AssetKind.BUSBAR, parentId="T1"),
+        Asset(id="LV-BRK", name="Lavspent hovedbryter", kind=AssetKind.BREAKER, parentId="T1"),
+        Asset(id="BUS-01", name="0.4 kV samleskinne", kind=AssetKind.BUSBAR, parentId="LV-BRK"),
         Asset(id="F1", name=FEEDER_PROFILES["F1"]["name"], kind=AssetKind.FEEDER, parentId="BUS-01"),
         Asset(id="F2", name=FEEDER_PROFILES["F2"]["name"], kind=AssetKind.FEEDER, parentId="BUS-01"),
         Asset(id="F3", name=FEEDER_PROFILES["F3"]["name"], kind=AssetKind.FEEDER, parentId="BUS-01"),
@@ -41,7 +43,8 @@ def build_demo_topology(station_id: str) -> StationTopology:
     edges = [
         TopologyEdge(sourceId=station_id, targetId="BRK-IN", relation="contains"),
         TopologyEdge(sourceId="BRK-IN", targetId="T1", relation="feeds"),
-        TopologyEdge(sourceId="T1", targetId="BUS-01", relation="steps_down_to"),
+        TopologyEdge(sourceId="T1", targetId="LV-BRK", relation="steps_down_to"),
+        TopologyEdge(sourceId="LV-BRK", targetId="BUS-01", relation="feeds"),
         TopologyEdge(sourceId="BUS-01", targetId="F1", relation="supplies"),
         TopologyEdge(sourceId="BUS-01", targetId="F2", relation="supplies"),
         TopologyEdge(sourceId="BUS-01", targetId="F3", relation="supplies"),
@@ -100,6 +103,7 @@ def _build_feeder_telemetry(
     timestamp: str,
     nominal_phase_voltage_v: float,
     nominal_line_voltage_v: float,
+    supply_available: bool,
     service_target_phase_voltage_v: float | None = None,
 ) -> FeederTelemetry:
     profile = FEEDER_PROFILES[control.id]
@@ -134,7 +138,7 @@ def _build_feeder_telemetry(
         last_trip_reason = "overload"
         last_trip_at = timestamp
 
-    if breaker_status != BreakerStatus.CLOSED:
+    if breaker_status != BreakerStatus.CLOSED or not supply_available:
         net_kw = 0.0
         reactive_kvar = 0.0
         mean_current = 0.0
@@ -193,7 +197,11 @@ def _build_feeder_telemetry(
             phaseImbalancePercent=round(control.phaseImbalancePercent, 1),
             voltageDeviationPercent=round(voltage_deviation, 1),
             powerDirection=_power_direction(net_kw),
-            affectedCustomers=0 if breaker_status == BreakerStatus.CLOSED else int(profile["customers"]),
+            affectedCustomers=(
+                0
+                if breaker_status == BreakerStatus.CLOSED and supply_available
+                else int(profile["customers"])
+            ),
         ),
     )
 
@@ -206,25 +214,42 @@ def build_snapshot(
     nominal_phase_voltage_v: float,
     nominal_line_voltage_v: float,
     transformer_rating_kva: float,
+    station_breaker_states: dict[str, BreakerStatus] | None = None,
     service_target_phase_voltage_v: float | None = None,
 ) -> StationSnapshot:
     timestamp = _now_iso()
+    station_breaker_states = station_breaker_states or {
+        "BRK-IN": BreakerStatus.CLOSED,
+        "LV-BRK": BreakerStatus.CLOSED,
+    }
+    inlet_breaker_status = station_breaker_states.get("BRK-IN", BreakerStatus.CLOSED)
+    lv_breaker_status = station_breaker_states.get("LV-BRK", BreakerStatus.CLOSED)
+    transformer_energized = inlet_breaker_status == BreakerStatus.CLOSED
+    bus_energized = transformer_energized and lv_breaker_status == BreakerStatus.CLOSED
     feeders = [
         _build_feeder_telemetry(
             control=control,
             timestamp=timestamp,
             nominal_phase_voltage_v=nominal_phase_voltage_v,
             nominal_line_voltage_v=nominal_line_voltage_v,
+            supply_available=bus_energized,
             service_target_phase_voltage_v=service_target_phase_voltage_v,
         )
         for control in controls
     ]
 
-    total_kw = sum(feeder.activePowerKw for feeder in feeders)
-    total_kvar = sum(feeder.reactivePowerKvar for feeder in feeders)
+    total_kw = sum(feeder.activePowerKw for feeder in feeders) if bus_energized else 0.0
+    total_kvar = sum(feeder.reactivePowerKvar for feeder in feeders) if bus_energized else 0.0
     apparent_kva = sqrt((total_kw**2) + (total_kvar**2))
     load_percent = (apparent_kva / transformer_rating_kva) * 100 if transformer_rating_kva else 0.0
-    avg_phase_voltage = sum((feeder.voltage.l1 + feeder.voltage.l2 + feeder.voltage.l3) / 3 for feeder in feeders) / max(len(feeders), 1)
+    no_load_line_voltage = round((service_target_phase_voltage_v or nominal_phase_voltage_v + 2.0) * sqrt(3), 1)
+    closed_feeders = [feeder for feeder in feeders if feeder.breakerStatus == BreakerStatus.CLOSED]
+    avg_phase_voltage = (
+        sum((feeder.voltage.l1 + feeder.voltage.l2 + feeder.voltage.l3) / 3 for feeder in closed_feeders)
+        / max(len(closed_feeders), 1)
+        if bus_energized and closed_feeders
+        else 0.0
+    )
     communication_ok = all(feeder.quality not in {DataQuality.INVALID, DataQuality.LOST} for feeder in feeders)
 
     transformer = TransformerTelemetry(
@@ -233,16 +258,42 @@ def build_snapshot(
         loadPercent=round(load_percent, 1),
         activePowerKw=round(total_kw, 1),
         apparentPowerKva=round(apparent_kva, 1),
-        secondaryVoltageV=round(avg_phase_voltage * sqrt(3), 1),
-        topOilTempC=round(ambient_temp_c + 34.0 + load_percent * 0.32, 1),
+        secondaryVoltageV=(
+            round(avg_phase_voltage * sqrt(3), 1)
+            if bus_energized and closed_feeders
+            else no_load_line_voltage if transformer_energized
+            else 0.0
+        ),
+        topOilTempC=round(
+            ambient_temp_c + (8.0 if transformer_energized else 2.0) + load_percent * 0.32,
+            1,
+        ),
         communicationOk=communication_ok,
         quality=DataQuality.GOOD if communication_ok else DataQuality.LOST,
     )
+
+    station_breakers = [
+        StationBreakerTelemetry(
+            id="BRK-IN",
+            name="Inntaksbryter",
+            timestamp=timestamp,
+            breakerStatus=inlet_breaker_status,
+            quality=DataQuality.GOOD,
+        ),
+        StationBreakerTelemetry(
+            id="LV-BRK",
+            name="Lavspent hovedbryter",
+            timestamp=timestamp,
+            breakerStatus=lv_breaker_status,
+            quality=DataQuality.GOOD,
+        ),
+    ]
 
     return StationSnapshot(
         stationId=station_id,
         timestamp=timestamp,
         mode=mode,
         transformer=transformer,
+        stationBreakers=station_breakers,
         feeders=feeders,
     )

@@ -22,7 +22,7 @@ async def open_breaker(request: Request, command: BreakerCommandRequest):
     try:
         result = await _state(request).execute_breaker_command(CommandAction.OPEN_BREAKER, command)
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail=f"Unknown feeder: {command.objectId}") from exc
+        raise HTTPException(status_code=404, detail=f"Unknown controllable object: {command.objectId}") from exc
     await _simulator(request).refresh_now()
     return result
 
@@ -33,6 +33,6 @@ async def close_breaker(request: Request, command: BreakerCommandRequest):
     try:
         result = await _state(request).execute_breaker_command(CommandAction.CLOSE_BREAKER, command)
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail=f"Unknown feeder: {command.objectId}") from exc
+        raise HTTPException(status_code=404, detail=f"Unknown controllable object: {command.objectId}") from exc
     await _simulator(request).refresh_now()
     return result

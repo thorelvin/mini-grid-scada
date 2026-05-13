@@ -1,9 +1,11 @@
 import asyncio
+from datetime import datetime, timedelta
 
 from backend.app.domain.enums import CommandAction
 from backend.app.domain.models import BreakerCommandRequest, FeederControlPatch, NormalProfileSummary, ScenarioSummary, TimedEventSummary
 from backend.app.services.alarm_service import evaluate_snapshot
 from backend.app.services.app_state import AppState
+from backend.app.services.simulator_service import SimulatorService
 from simulator.dynamics import DEFAULT_PROFILE_ID, list_profiles, list_timed_events
 from simulator.grid_simulator import build_demo_topology, build_snapshot, create_default_controls
 from simulator.scenarios import list_scenarios
@@ -22,6 +24,7 @@ def _build_state() -> AppState:
 
 async def _refresh_state(app_state: AppState) -> None:
     controls = await app_state.get_controls()
+    station_breakers = await app_state.get_station_breakers()
     simulator_settings = await app_state.get_simulator_settings()
     snapshot = build_snapshot(
         station_id="NST-001",
@@ -31,6 +34,7 @@ async def _refresh_state(app_state: AppState) -> None:
         nominal_phase_voltage_v=230.0,
         nominal_line_voltage_v=400.0,
         transformer_rating_kva=1250.0,
+        station_breaker_states=station_breakers,
     )
     alarms = evaluate_snapshot(snapshot)
     await app_state.update_frame(snapshot, alarms)
@@ -61,6 +65,62 @@ def test_open_breaker_requires_reason_and_confirmation():
         controls = await app_state.get_controls()
         f1 = next(control for control in controls if control.id == "F1")
         assert f1.breakerStatus == "open"
+
+    asyncio.run(run())
+
+
+def test_lv_breaker_open_deenergizes_all_closed_downstream_feeders():
+    async def run():
+        app_state = _build_state()
+        await _refresh_state(app_state)
+
+        result = await app_state.execute_breaker_command(
+            CommandAction.OPEN_BREAKER,
+            BreakerCommandRequest(
+                objectId="LV-BRK",
+                operator="operator",
+                reason="Station maintenance",
+                confirmImpact=True,
+            ),
+        )
+        assert result.allowed is True
+
+        await _refresh_state(app_state)
+        snapshot = await app_state.get_snapshot()
+
+        assert next(item for item in snapshot.stationBreakers if item.id == "LV-BRK").breakerStatus == "open"
+        assert snapshot.transformer.secondaryVoltageV > 0
+        assert all(feeder.activePowerKw == 0 for feeder in snapshot.feeders)
+        assert all(feeder.derived.affectedCustomers == feeder.customers for feeder in snapshot.feeders)
+
+    asyncio.run(run())
+
+
+def test_lv_breaker_close_is_blocked_when_downstream_trip_is_active():
+    async def run():
+        app_state = _build_state()
+        await app_state.update_control("F3", FeederControlPatch(loadKw=320.0))
+        await _refresh_state(app_state)
+        await app_state.acknowledge_alarms("F3")
+
+        opened = await app_state.execute_breaker_command(
+            CommandAction.OPEN_BREAKER,
+            BreakerCommandRequest(
+                objectId="LV-BRK",
+                operator="operator",
+                reason="Testing",
+                confirmImpact=True,
+            ),
+        )
+        assert opened.allowed is True
+
+        blocked = await app_state.execute_breaker_command(
+            CommandAction.CLOSE_BREAKER,
+            BreakerCommandRequest(objectId="LV-BRK", operator="operator", reason="Restore bus"),
+        )
+
+        assert blocked.allowed is False
+        assert any("fault" in reason.lower() for reason in blocked.interlock.reasons)
 
     asyncio.run(run())
 
@@ -105,5 +165,99 @@ def test_measured_overload_latches_trip_until_operator_clears_fault():
         f3_after_clear = next(control for control in controls_after_clear if control.id == "F3")
         assert f3_after_clear.faultMode == "normal"
         assert f3_after_clear.breakerStatus == "open"
+
+    asyncio.run(run())
+
+
+def test_measured_overload_can_reclose_after_load_reduction_and_acknowledge():
+    async def run():
+        app_state = _build_state()
+        await app_state.update_control("F3", FeederControlPatch(loadKw=320.0))
+        await _refresh_state(app_state)
+
+        first_snapshot = await app_state.get_snapshot()
+        first_feeder = next(feeder for feeder in first_snapshot.feeders if feeder.id == "F3")
+        assert first_feeder.breakerStatus == "tripped"
+        assert first_feeder.derived.utilizationPercent >= first_feeder.protection.tripPercent
+
+        await app_state.acknowledge_alarms("F3")
+        await app_state.update_control("F3", FeederControlPatch(loadKw=120.0))
+        await _refresh_state(app_state)
+
+        second_snapshot = await app_state.get_snapshot()
+        second_feeder = next(feeder for feeder in second_snapshot.feeders if feeder.id == "F3")
+        assert second_feeder.breakerStatus == "tripped"
+        assert second_feeder.derived.utilizationPercent < second_feeder.protection.warningPercent
+
+        result = await app_state.execute_breaker_command(
+            CommandAction.CLOSE_BREAKER,
+            BreakerCommandRequest(objectId="F3", operator="operator", reason="Restore after overload"),
+        )
+
+        assert result.allowed is True
+
+        controls = await app_state.get_controls()
+        f3_control = next(control for control in controls if control.id == "F3")
+        assert f3_control.breakerStatus == "closed"
+        assert f3_control.faultMode == "normal"
+
+    asyncio.run(run())
+
+
+def test_profile_to_custom_transition_preserves_other_live_feeders():
+    async def run():
+        app_state = _build_state()
+        await app_state.activate_profile("weekday")
+
+        started_at = datetime.fromisoformat(app_state._active_profile_started_at)
+        first_tick = (started_at + timedelta(minutes=9)).isoformat()
+        second_tick = (started_at + timedelta(minutes=10)).isoformat()
+
+        await app_state.advance_dynamic_state(now=first_tick)
+        live_controls = await app_state.get_controls()
+        f1_before = next(control for control in live_controls if control.id == "F1")
+        f3_before = next(control for control in live_controls if control.id == "F3")
+
+        assert f3_before.loadKw != 168.0
+
+        await app_state.update_control("F1", FeederControlPatch(loadKw=round(f1_before.loadKw + 15.0, 1)))
+        await app_state.advance_dynamic_state(now=second_tick)
+
+        custom_controls = await app_state.get_controls()
+        f1_after = next(control for control in custom_controls if control.id == "F1")
+        f3_after = next(control for control in custom_controls if control.id == "F3")
+
+        assert f1_after.loadKw == round(f1_before.loadKw + 15.0, 1)
+        assert f3_after.loadKw == f3_before.loadKw
+
+    asyncio.run(run())
+
+
+def test_refresh_now_preserves_other_live_feeders_after_manual_update():
+    async def run():
+        app_state = _build_state()
+        simulator = SimulatorService(app_state)
+        await simulator.start()
+
+        try:
+            await app_state.reset_simulation()
+
+            before = await app_state.get_dashboard()
+            before_controls = {control.id: control for control in before.controls}
+
+            assert before_controls["F3"].loadKw != 168.0
+
+            await app_state.update_control("F1", FeederControlPatch(loadKw=100.0))
+            await simulator.refresh_now()
+
+            after = await app_state.get_dashboard()
+            after_controls = {control.id: control for control in after.controls}
+
+            assert after_controls["F1"].loadKw == 100.0
+            assert after_controls["F2"].loadKw == before_controls["F2"].loadKw
+            assert after_controls["F3"].loadKw == before_controls["F3"].loadKw
+            assert after_controls["F4"].loadKw == before_controls["F4"].loadKw
+        finally:
+            await simulator.stop()
 
     asyncio.run(run())

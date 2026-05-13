@@ -183,6 +183,7 @@ export function SimulatorPanel({
         </div>
       ) : null}
 
+      <fieldset className="simulator-fieldset" disabled={busy}>
       <div className="tab-strip">
         <TabButton active={activeTab === "load"} label="Last & produksjon" onClick={() => setActiveTab("load")} />
         <TabButton active={activeTab === "patterns"} label="Normalprofiler" onClick={() => setActiveTab("patterns")} />
@@ -433,6 +434,7 @@ export function SimulatorPanel({
           })}
         </div>
       ) : null}
+      </fieldset>
     </section>
   );
 }

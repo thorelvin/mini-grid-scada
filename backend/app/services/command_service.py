@@ -22,7 +22,29 @@ from backend.app.domain.models import (
 
 
 BLOCKING_QUALITIES = {DataQuality.STALE, DataQuality.INVALID, DataQuality.LOST}
-BLOCKING_FAULTS = {FaultMode.OVERLOAD, FaultMode.SENSOR_FAULT, FaultMode.FORCED_TRIP}
+
+
+def _get_reclose_block_reason(
+    feeder: FeederTelemetry,
+    control: FeederControlInput,
+    object_alarms: list[Alarm],
+) -> str | None:
+    if control.faultMode == FaultMode.FORCED_TRIP:
+        return "Closing blocked: a forced trip condition is still present."
+
+    if control.faultMode == FaultMode.SENSOR_FAULT:
+        return "Closing blocked: a sensor fault is still present."
+
+    if control.faultMode == FaultMode.OVERLOAD:
+        overload_alarm_titles = {
+            "Protection trip threshold exceeded",
+            "Overload warning",
+        }
+        has_active_overload_alarm = any(alarm.title in overload_alarm_titles for alarm in object_alarms)
+        if has_active_overload_alarm or feeder.derived.utilizationPercent >= feeder.protection.warningPercent:
+            return "Closing blocked: the overload condition has not cleared yet."
+
+    return None
 
 
 def _now_iso() -> str:
@@ -91,8 +113,13 @@ def evaluate_breaker_command(
         reasons.append("Closing blocked: breaker is already closed.")
     if control.communicationState in BLOCKING_QUALITIES:
         reasons.append("Closing blocked: telemetry quality is degraded.")
-    if control.faultMode in BLOCKING_FAULTS:
-        reasons.append("Closing blocked: an active fault or trip condition is still present.")
+    reclose_block_reason = _get_reclose_block_reason(
+        feeder=feeder,
+        control=control,
+        object_alarms=object_alarms,
+    )
+    if reclose_block_reason is not None:
+        reasons.append(reclose_block_reason)
     if unacknowledged_critical_alarms:
         reasons.append("Closing blocked: an unacknowledged critical alarm is active.")
     if any(alarm.title == "Communication degraded" for alarm in object_alarms):

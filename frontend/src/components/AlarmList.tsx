@@ -12,6 +12,7 @@ interface AlarmListProps {
   onAcknowledge: (alarmId: string) => Promise<void>;
   onAcknowledgeAll: () => Promise<void>;
   onSelectAsset: (assetId: string) => void;
+  readOnly?: boolean;
 }
 
 export function AlarmList({
@@ -20,6 +21,7 @@ export function AlarmList({
   onAcknowledge,
   onAcknowledgeAll,
   onSelectAsset,
+  readOnly = false,
 }: AlarmListProps) {
   const sortedAlarms = sortAlarms(alarms);
 
@@ -42,11 +44,11 @@ export function AlarmList({
           <div className="table-shell">
             <div className="table-header alarm-table">
               <span>Tid</span>
-              <span>Prioritet</span>
+              <span>Pri</span>
               <span>Alarm</span>
-              <span>Objekt</span>
-              <span>Status</span>
-              <span>Handling</span>
+              <span>Obj</span>
+              <span>Stat</span>
+              <span>Kvitt</span>
             </div>
 
             <div className="table-body">
@@ -66,7 +68,7 @@ export function AlarmList({
                   <span>{alarm.objectId}</span>
                   <span className={`state-label state-${alarm.state}`}>{getAlarmStateLabel(alarm.state)}</span>
                   <span>
-                    {alarm.state !== "acknowledged" ? (
+                    {alarm.state !== "acknowledged" && !readOnly ? (
                       <span
                         className="inline-link"
                         onClick={(event) => {
@@ -85,7 +87,7 @@ export function AlarmList({
             </div>
           </div>
 
-          <button type="button" className="secondary-button full-width" onClick={() => void onAcknowledgeAll()}>
+          <button type="button" className="secondary-button full-width" onClick={() => void onAcknowledgeAll()} disabled={readOnly}>
             Kvitter alle alarmer
           </button>
         </>

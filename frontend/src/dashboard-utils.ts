@@ -8,6 +8,7 @@ import type {
   FeederControlInput,
   FeederTelemetry,
   FaultMode,
+  PhaseValues,
   SystemHealth,
   TrendSeries,
 } from "./types";
@@ -25,6 +26,12 @@ export const seriesPalette: Record<string, string> = {
   F3: "#ff8d36",
   F4: "#82d95b",
   T1: "#f3f4f6",
+};
+
+export const phasePalette: Record<"l1" | "l2" | "l3", string> = {
+  l1: "#73a6ff",
+  l2: "#b28dff",
+  l3: "#ff8d36",
 };
 
 export function formatTime(timestamp?: string | null): string {
@@ -70,6 +77,33 @@ export function formatValue(value: number, digits = 0): string {
 export function formatSignedValue(value: number, digits = 0): string {
   const prefix = value > 0 ? "" : value < 0 ? "-" : "";
   return `${prefix}${formatValue(Math.abs(value), digits)}`;
+}
+
+export function getVoltageExtrema(voltage: PhaseValues): { min: number; max: number } {
+  const values = [voltage.l1, voltage.l2, voltage.l3];
+  return {
+    min: Math.min(...values),
+    max: Math.max(...values),
+  };
+}
+
+export function formatVoltageRangeLabel(voltage: PhaseValues, digits = 0): string {
+  const { min, max } = getVoltageExtrema(voltage);
+  return `${formatValue(min, digits)}-${formatValue(max, digits)} V`;
+}
+
+export function getTrendSeriesColor(seriesId: string): string {
+  if (seriesPalette[seriesId]) {
+    return seriesPalette[seriesId];
+  }
+
+  const phaseMatch = seriesId.match(/:(l1|l2|l3)$/i);
+  if (phaseMatch) {
+    return phasePalette[phaseMatch[1].toLowerCase() as "l1" | "l2" | "l3"];
+  }
+
+  const feederPrefix = seriesId.split(":")[0];
+  return seriesPalette[feederPrefix] ?? "#ffffff";
 }
 
 export function sortAlarms(alarms: Alarm[]): Alarm[] {

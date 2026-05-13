@@ -47,6 +47,7 @@ class SimulatorService:
     async def _produce_frame(self) -> None:
         await self._app_state.advance_dynamic_state()
         controls = await self._app_state.get_controls()
+        station_breakers = await self._app_state.get_station_breakers()
         simulator_settings = await self._app_state.get_simulator_settings()
         snapshot = build_snapshot(
             station_id=settings.station_id,
@@ -57,6 +58,7 @@ class SimulatorService:
             service_target_phase_voltage_v=settings.service_target_phase_voltage_v,
             nominal_line_voltage_v=settings.nominal_line_voltage_v,
             transformer_rating_kva=settings.transformer_rating_kva,
+            station_breaker_states=station_breakers,
         )
         alarms = evaluate_snapshot(snapshot)
         await self._app_state.update_frame(snapshot, alarms)

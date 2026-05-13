@@ -57,8 +57,40 @@ function feederMap(snapshot: StationSnapshot): Map<string, FeederTelemetry> {
   return new Map(snapshot.feeders.map((feeder) => [feeder.id, feeder]));
 }
 
-function isSupplyAvailable(snapshot: StationSnapshot): boolean {
-  return snapshot.transformer.quality === "good" && snapshot.transformer.secondaryVoltageV > 40;
+function stationBreakerStatus(snapshot: StationSnapshot, breakerId: "BRK-IN" | "LV-BRK"): BreakerStatus {
+  return (snapshot.stationBreakers ?? []).find((breaker) => breaker.id === breakerId)?.breakerStatus ?? "closed";
+}
+
+function isTransformerEnergized(snapshot: StationSnapshot): boolean {
+  return (
+    stationBreakerStatus(snapshot, "BRK-IN") === "closed" &&
+    snapshot.transformer.quality === "good" &&
+    snapshot.transformer.secondaryVoltageV > 40
+  );
+}
+
+function isBusSupplyAvailable(snapshot: StationSnapshot): boolean {
+  return isTransformerEnergized(snapshot) && stationBreakerStatus(snapshot, "LV-BRK") === "closed";
+}
+
+function isUpstreamSupplyAvailable(snapshot: StationSnapshot, assetId: string): boolean {
+  if (assetId === "BRK-IN") {
+    return true;
+  }
+
+  if (assetId === "T1" || assetId === "LV-BRK") {
+    return stationBreakerStatus(snapshot, "BRK-IN") === "closed";
+  }
+
+  if (assetId === "BUS-01") {
+    return isTransformerEnergized(snapshot);
+  }
+
+  return isBusSupplyAvailable(snapshot);
+}
+
+function isFeederEnergized(snapshot: StationSnapshot, feeder: FeederTelemetry): boolean {
+  return isBusSupplyAvailable(snapshot) && feeder.breakerStatus === "closed";
 }
 
 export function getTopologyImpactSummary(
@@ -94,10 +126,10 @@ export function getTopologyImpactSummary(
   const totalCustomers = downstreamFeeders.reduce((sum, feeder) => sum + feeder.customers, 0);
   const criticalCustomers = downstreamFeeders.reduce((sum, feeder) => sum + feeder.criticalCustomers, 0);
   const disconnectedCustomers = downstreamFeeders.reduce(
-    (sum, feeder) => sum + (feeder.breakerStatus === "closed" ? 0 : feeder.customers),
+    (sum, feeder) => sum + (isFeederEnergized(snapshot, feeder) ? 0 : feeder.customers),
     0,
   );
-  const energizedFeederCount = downstreamFeeders.filter((feeder) => feeder.breakerStatus === "closed").length;
+  const energizedFeederCount = downstreamFeeders.filter((feeder) => isFeederEnergized(snapshot, feeder)).length;
   const deenergizedFeederCount = downstreamFeeders.length - energizedFeederCount;
 
   return {
@@ -109,7 +141,7 @@ export function getTopologyImpactSummary(
     disconnectedCustomers,
     energizedFeederCount,
     deenergizedFeederCount,
-    upstreamSupplyAvailable: isSupplyAvailable(snapshot),
+    upstreamSupplyAvailable: isUpstreamSupplyAvailable(snapshot, assetId),
   };
 }
 
@@ -117,7 +149,7 @@ export function getFeederCommandPreviews(
   feeder: FeederTelemetry,
   snapshot: StationSnapshot,
 ): { open: CommandPreviewSummary; close: CommandPreviewSummary } {
-  const supplyAvailable = isSupplyAvailable(snapshot);
+  const supplyAvailable = isBusSupplyAvailable(snapshot);
   const openCustomers = feeder.breakerStatus === "closed" ? feeder.customers : 0;
   const openCriticalCustomers = feeder.breakerStatus === "closed" ? feeder.criticalCustomers : 0;
   const canRestoreCustomers = feeder.breakerStatus === "closed" ? 0 : feeder.customers;

@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   formatTime,
   formatValue,
+  formatVoltageRangeLabel,
   getBreakerStatusLabel,
   getFaultModeLabel,
   getObjectAlarms,
@@ -18,15 +19,27 @@ import {
 } from "../topology-utils";
 import type {
   Alarm,
+  BreakerStatus,
   BreakerCommandRequest,
   CommandResult,
   FeederControlInput,
   FeederTelemetry,
+  StationBreakerTelemetry,
   StationSnapshot,
   StationTopology,
 } from "../types";
 
 type PanelTab = "status" | "measurements" | "command" | "info";
+type StationBreakerId = "BRK-IN" | "LV-BRK";
+
+interface StationBreakerViewModel {
+  id: StationBreakerId;
+  title: string;
+  status: BreakerStatus;
+  qualityLabel: string;
+  note: string;
+  measuredVoltageV: number;
+}
 
 interface SelectedObjectPanelProps {
   topology: StationTopology | null;
@@ -43,6 +56,41 @@ interface SelectedObjectPanelProps {
 
 function findFeeder(snapshot: StationSnapshot, selectedAssetId: string): FeederTelemetry | undefined {
   return snapshot.feeders.find((feeder) => feeder.id === selectedAssetId);
+}
+
+function isStationBreaker(assetId: string): assetId is StationBreakerId {
+  return assetId === "BRK-IN" || assetId === "LV-BRK";
+}
+
+function buildStationBreakerViewModel(
+  snapshot: StationSnapshot,
+  selectedAssetId: StationBreakerId,
+): StationBreakerViewModel {
+  const stationBreaker = (snapshot.stationBreakers ?? []).find((item) => item.id === selectedAssetId);
+  const busEnergized =
+    snapshot.transformer.quality === "good" && snapshot.transformer.secondaryVoltageV > 40;
+
+  if (selectedAssetId === "BRK-IN") {
+    return {
+      id: "BRK-IN",
+      title: "BRK-IN - Inntaksbryter",
+      status: stationBreaker?.breakerStatus ?? (busEnergized ? "closed" : "open"),
+      qualityLabel: getQualityLabel(stationBreaker?.quality ?? snapshot.transformer.quality),
+      note:
+        "BRK-IN styrer om transformatoren er energisert fra innmatingen. Kommandoer pa dette objektet er konservative og krever eksplisitt konsekvensvurdering.",
+      measuredVoltageV: snapshot.transformer.secondaryVoltageV,
+    };
+  }
+
+  return {
+    id: "LV-BRK",
+    title: "LV-BRK - Lavspentbryter",
+    status: stationBreaker?.breakerStatus ?? (busEnergized ? "closed" : "open"),
+    qualityLabel: getQualityLabel(stationBreaker?.quality ?? snapshot.transformer.quality),
+    note:
+      "LV-BRK styrer om hele 0.4 kV-samleskinnen er spenningssatt. Lukking sperres nar oppstroms mating mangler eller nedstroms feil fortsatt er aktiv.",
+    measuredVoltageV: snapshot.transformer.secondaryVoltageV,
+  };
 }
 
 function TabButton({
@@ -92,6 +140,302 @@ function ImpactStat({ label, value, accent = false }: { label: string; value: st
   );
 }
 
+function StationBreakerPanel({
+  snapshot,
+  topology,
+  alarms,
+  selectedAssetId,
+  lastCommandResult,
+  busy,
+  onOpenBreaker,
+  onCloseBreaker,
+  onAcknowledgeAll,
+  activeTab,
+  setActiveTab,
+}: {
+  snapshot: StationSnapshot;
+  topology: StationTopology | null;
+  alarms: Alarm[];
+  selectedAssetId: StationBreakerId;
+  lastCommandResult?: CommandResult | null;
+  busy: boolean;
+  onOpenBreaker: (command: BreakerCommandRequest) => Promise<void>;
+  onCloseBreaker: (command: BreakerCommandRequest) => Promise<void>;
+  onAcknowledgeAll: (objectId?: string) => Promise<void>;
+  activeTab: PanelTab;
+  setActiveTab: (tab: PanelTab) => void;
+}) {
+  const breaker = buildStationBreakerViewModel(snapshot, selectedAssetId);
+  const impactSummary = getTopologyImpactSummary(topology, snapshot, selectedAssetId);
+  const affectedFeeders = impactSummary?.downstreamFeederIds.join(", ") || "Ingen nedstrøms grener";
+  const [operator, setOperator] = useState("Operatør");
+  const [reason, setReason] = useState("Stasjonskobling");
+  const relatedCommand = lastCommandResult?.objectId === selectedAssetId ? lastCommandResult : null;
+  const relatedAlarms = sortAlarms(alarms.filter((alarm) => impactSummary?.downstreamFeederIds.includes(alarm.objectId)));
+
+  async function handleOpenBreaker() {
+    const confirmed = window.confirm(
+      `Åpne ${selectedAssetId}? Dette kan berøre ${impactSummary?.totalCustomers ?? 0} kunder, inkludert ${impactSummary?.criticalCustomers ?? 0} kritiske kunder.`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    await onOpenBreaker({
+      objectId: selectedAssetId,
+      operator,
+      reason,
+      confirmImpact: true,
+    });
+  }
+
+  async function handleCloseBreaker() {
+    await onCloseBreaker({
+      objectId: selectedAssetId,
+      operator,
+      reason: reason || "Gjeninnkobling etter stasjonsvurdering",
+      confirmImpact: true,
+    });
+  }
+
+  return (
+    <section className="panel scada-panel object-panel">
+      <div className="panel-header">
+        <div>
+          <p className="panel-kicker">Valgt objekt</p>
+          <h2>{breaker.title}</h2>
+        </div>
+        <span
+          className={`state-pill tone-${
+            breaker.status === "closed" ? "good" : breaker.status === "open" ? "warn" : "critical"
+          }`}
+        >
+          {getBreakerStatusLabel(breaker.status)}
+        </span>
+      </div>
+
+      <div className="tab-strip">
+        <TabButton active={activeTab === "status"} label="Status" onClick={() => setActiveTab("status")} />
+        <TabButton active={activeTab === "command"} label="Kommando" onClick={() => setActiveTab("command")} />
+        <TabButton active={activeTab === "info"} label="Info" onClick={() => setActiveTab("info")} />
+      </div>
+
+      <div className="panel-block">
+        {activeTab === "status" ? (
+          <>
+            <MetricRow label="Status" value={getBreakerStatusLabel(breaker.status)} accent />
+            <MetricRow label="Kvalitet" value={breaker.qualityLabel} />
+            <MetricRow
+              label="Nedstrøms kunder"
+              value={formatValue(impactSummary?.totalCustomers ?? 0)}
+            />
+            <MetricRow
+              label="Kritiske kunder"
+              value={formatValue(impactSummary?.criticalCustomers ?? 0)}
+            />
+            <MetricRow
+              label="Feedere berørt"
+              value={formatValue(impactSummary?.downstreamFeederIds.length ?? 0)}
+            />
+            <MetricRow label="Målt sekundærspenning" value={`${formatValue(breaker.measuredVoltageV, 0)} V`} />
+            <MetricRow label="Siste oppdatering" value={formatTime(snapshot.timestamp)} />
+          </>
+        ) : null}
+
+        {activeTab === "command" ? (
+          <>
+            <label className="field-stack">
+              <span>Operatør</span>
+              <input value={operator} onChange={(event) => setOperator(event.target.value)} />
+            </label>
+            <label className="field-stack">
+              <span>Begrunnelse</span>
+              <input value={reason} onChange={(event) => setReason(event.target.value)} />
+            </label>
+            <div className="impact-card">
+              <strong>Stasjonsnivå-kobling</strong>
+              <p>
+                {breaker.note}
+              </p>
+            </div>
+            {relatedCommand ? (
+              <div className={`command-result ${relatedCommand.allowed ? "allowed" : "blocked"}`}>
+                <strong>{relatedCommand.allowed ? "Kommando utført" : "Kommando blokkert"}</strong>
+                <p>{relatedCommand.message}</p>
+              </div>
+            ) : null}
+            <div className="command-preview-grid">
+              <div className="command-preview-card tone-warn">
+                <span>Ved utkobling</span>
+                <strong>{formatValue(impactSummary?.totalCustomers ?? 0)} kunder kan bli berørt</strong>
+                <p>
+                  Hele den nedstrøms forsyningsveien må vurderes før stasjonskobling gjøres tilgjengelig.
+                </p>
+              </div>
+              <div className="command-preview-card tone-neutral">
+                <span>Ved innkobling</span>
+                <strong>Konservativ gjeninnkobling</strong>
+                <p>
+                  Lukking vurderes mot oppstrøms mating, downstream alarmer, datakvalitet og fault-latcher før kommandoen slipper gjennom.
+                </p>
+              </div>
+            </div>
+          </>
+        ) : null}
+
+        {activeTab === "info" ? (
+          <>
+            <MetricRow label="Objekttype" value="Stasjonsbryter" />
+            <MetricRow label="Forsyningsvei" value={affectedFeeders} />
+            <MetricRow label="Trafo koblet" value={snapshot.transformer.id} />
+            <MetricRow label="Topologirolle" value={selectedAssetId === "BRK-IN" ? "Oppstrøms inntak" : "Lavspent utgående"} />
+            <MetricRow label="Aktive alarmer nedstrøms" value={formatValue(relatedAlarms.length)} />
+          </>
+        ) : null}
+      </div>
+
+      {impactSummary ? (
+        <>
+          <div className="subpanel">
+            <h3>Forsyningsvei</h3>
+            <RouteSummary pathIds={impactSummary.pathIds} />
+          </div>
+
+          <div className="subpanel">
+            <h3>Nettkonsekvens</h3>
+            <div className="impact-grid">
+              <ImpactStat label="Kunder nedstrøms" value={formatValue(impactSummary.totalCustomers)} accent />
+              <ImpactStat label="Kritiske kunder" value={formatValue(impactSummary.criticalCustomers)} />
+              <ImpactStat label="Feedere inne" value={formatValue(impactSummary.energizedFeederCount)} />
+              <ImpactStat label="Feedere ute" value={formatValue(impactSummary.deenergizedFeederCount)} />
+            </div>
+            <p className="impact-note">
+              Nedstrøms grener: {affectedFeeders}. Stasjonsbryteren er nå fullt modellert i topologien og bruker samme audit-logg som feederkommandoer.
+            </p>
+          </div>
+        </>
+      ) : null}
+
+      <div className="subpanel">
+        <h3>Operatørhandlinger</h3>
+        <div className="command-row">
+          <button type="button" className="primary-button" disabled={busy} onClick={() => void handleOpenBreaker()}>
+            Åpne bryter
+          </button>
+          <button type="button" className="secondary-button" disabled={busy} onClick={() => void handleCloseBreaker()}>
+            Lukk bryter
+          </button>
+        </div>
+        <div className="command-row single">
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={busy || relatedAlarms.length === 0}
+            onClick={() => void onAcknowledgeAll()}
+          >
+            Kvitter nedstroms alarmer
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function TransformerPanel({
+  snapshot,
+  topology,
+  alarms,
+  activeTab,
+  setActiveTab,
+}: {
+  snapshot: StationSnapshot;
+  topology: StationTopology | null;
+  alarms: Alarm[];
+  activeTab: PanelTab;
+  setActiveTab: (tab: PanelTab) => void;
+}) {
+  const transformer = snapshot.transformer;
+  const relatedAlarms = sortAlarms(getObjectAlarms(alarms, "T1"));
+  const activeTransformerAlarm = relatedAlarms[0] ?? null;
+  const impactSummary = getTopologyImpactSummary(topology, snapshot, "T1");
+
+  return (
+    <section className="panel scada-panel object-panel">
+      <div className="panel-header">
+        <div>
+          <p className="panel-kicker">Valgt objekt</p>
+          <h2>T1 - Trafo 22/0.4 kV</h2>
+        </div>
+        <span className={`state-pill tone-${activeTransformerAlarm ? activeTransformerAlarm.severity : "good"}`}>
+          {activeTransformerAlarm ? activeTransformerAlarm.title : getQualityLabel(transformer.quality)}
+        </span>
+      </div>
+
+      <div className="tab-strip">
+        <TabButton active={activeTab === "status"} label="Status" onClick={() => setActiveTab("status")} />
+        <TabButton active={activeTab === "measurements"} label="Målinger" onClick={() => setActiveTab("measurements")} />
+        <TabButton active={activeTab === "info"} label="Info" onClick={() => setActiveTab("info")} />
+      </div>
+
+      <div className="panel-block">
+        {activeTab === "status" ? (
+          <>
+            <MetricRow label="Status" value={getQualityLabel(transformer.quality)} accent />
+            <MetricRow label="Last" value={`${formatValue(transformer.loadPercent, 0)} %`} />
+            <MetricRow label="Aktiv effekt" value={`${formatValue(transformer.activePowerKw, 0)} kW`} />
+            <MetricRow label="Spenning sekundær" value={`${formatValue(transformer.secondaryVoltageV, 0)} V`} />
+            <MetricRow label="Temp. olje" value={`${formatValue(transformer.topOilTempC, 0)} °C`} />
+            <MetricRow label="Siste oppdatering" value={formatTime(transformer.timestamp)} />
+          </>
+        ) : null}
+
+        {activeTab === "measurements" ? (
+          <>
+            <MetricRow label="Trafospenning" value={`${formatValue(transformer.secondaryVoltageV, 1)} V`} />
+            <MetricRow label="Aktiv effekt" value={`${formatValue(transformer.activePowerKw, 1)} kW`} />
+            <MetricRow label="Tilsynelatende effekt" value={`${formatValue(transformer.apparentPowerKva, 1)} kVA`} />
+            <MetricRow
+              label="Effektfaktor"
+              value={formatValue(getPowerFactor(transformer.activePowerKw, transformer.apparentPowerKva), 2)}
+            />
+            <MetricRow label="Kommunikasjon" value={transformer.communicationOk ? "OK" : "Feil"} />
+          </>
+        ) : null}
+
+        {activeTab === "info" ? (
+          <>
+            <MetricRow label="Kvalitet" value={getQualityLabel(transformer.quality)} />
+            <MetricRow label="Aktive alarmer" value={String(relatedAlarms.length)} />
+            <MetricRow label="Anbefaling" value={activeTransformerAlarm ? activeTransformerAlarm.message : "Ingen aktive tiltak"} />
+          </>
+        ) : null}
+      </div>
+
+      {impactSummary ? (
+        <>
+          <div className="subpanel">
+            <h3>Forsyningsvei</h3>
+            <RouteSummary pathIds={impactSummary.pathIds} />
+          </div>
+
+          <div className="subpanel">
+            <h3>Nettkonsekvens</h3>
+            <div className="impact-grid">
+              <ImpactStat label="Nedstrøms kunder" value={formatValue(impactSummary.totalCustomers)} accent />
+              <ImpactStat label="Kritiske kunder" value={formatValue(impactSummary.criticalCustomers)} />
+              <ImpactStat label="Feedere inne" value={formatValue(impactSummary.energizedFeederCount)} />
+              <ImpactStat label="Feedere ute" value={formatValue(impactSummary.deenergizedFeederCount)} />
+            </div>
+            <p className="impact-note">
+              Område: {impactSummary.downstreamFeederIds.join(", ") || "Ingen nedstrøms grener"}.
+            </p>
+          </div>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
 export function SelectedObjectPanel({
   topology,
   snapshot,
@@ -107,6 +451,21 @@ export function SelectedObjectPanel({
   const [activeTab, setActiveTab] = useState<PanelTab>("status");
   const [operator, setOperator] = useState("Operatør");
   const [reason, setReason] = useState("Planlagt kobling");
+
+  useEffect(() => {
+    if (!selectedAssetId) {
+      return;
+    }
+
+    if (selectedAssetId === "T1" && activeTab === "command") {
+      setActiveTab("status");
+      return;
+    }
+
+    if (isStationBreaker(selectedAssetId) && activeTab === "measurements") {
+      setActiveTab("status");
+    }
+  }, [activeTab, selectedAssetId]);
 
   if (!snapshot) {
     return (
@@ -126,87 +485,33 @@ export function SelectedObjectPanel({
   }
 
   const resolvedAssetId = selectedAssetId ?? "T1";
-
   if (resolvedAssetId === "T1") {
-    const transformer = snapshot.transformer;
-    const relatedAlarms = sortAlarms(getObjectAlarms(alarms, "T1"));
-    const activeTransformerAlarm = relatedAlarms[0] ?? null;
-    const impactSummary = getTopologyImpactSummary(topology, snapshot, "T1");
-
     return (
-      <section className="panel scada-panel object-panel">
-        <div className="panel-header">
-          <div>
-            <p className="panel-kicker">Valgt objekt</p>
-            <h2>T1 - Trafo 22/0.4 kV</h2>
-          </div>
-          <span className={`state-pill tone-${activeTransformerAlarm ? activeTransformerAlarm.severity : "good"}`}>
-            {activeTransformerAlarm ? activeTransformerAlarm.title : getQualityLabel(transformer.quality)}
-          </span>
-        </div>
+      <TransformerPanel
+        snapshot={snapshot}
+        topology={topology}
+        alarms={alarms}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+      />
+    );
+  }
 
-        <div className="tab-strip">
-          <TabButton active={activeTab === "status"} label="Status" onClick={() => setActiveTab("status")} />
-          <TabButton active={activeTab === "measurements"} label="Målinger" onClick={() => setActiveTab("measurements")} />
-          <TabButton active={activeTab === "info"} label="Info" onClick={() => setActiveTab("info")} />
-        </div>
-
-        <div className="panel-block">
-          {activeTab === "status" ? (
-            <>
-              <MetricRow label="Status" value={getQualityLabel(transformer.quality)} accent />
-              <MetricRow label="Last" value={`${formatValue(transformer.loadPercent, 0)} %`} />
-              <MetricRow label="Aktiv effekt" value={`${formatValue(transformer.activePowerKw, 0)} kW`} />
-              <MetricRow label="Spenning sekundær" value={`${formatValue(transformer.secondaryVoltageV, 0)} V`} />
-              <MetricRow label="Temp. olje" value={`${formatValue(transformer.topOilTempC, 0)} °C`} />
-              <MetricRow label="Siste oppdatering" value={formatTime(transformer.timestamp)} />
-            </>
-          ) : null}
-
-          {activeTab === "measurements" ? (
-            <>
-              <MetricRow label="Trafospenning" value={`${formatValue(transformer.secondaryVoltageV, 1)} V`} />
-              <MetricRow label="Aktiv effekt" value={`${formatValue(transformer.activePowerKw, 1)} kW`} />
-              <MetricRow label="Tilsynelatende effekt" value={`${formatValue(transformer.apparentPowerKva, 1)} kVA`} />
-              <MetricRow
-                label="Effektfaktor"
-                value={formatValue(getPowerFactor(transformer.activePowerKw, transformer.apparentPowerKva), 2)}
-              />
-              <MetricRow label="Kommunikasjon" value={transformer.communicationOk ? "OK" : "Feil"} />
-            </>
-          ) : null}
-
-          {activeTab === "info" ? (
-            <>
-              <MetricRow label="Kvalitet" value={getQualityLabel(transformer.quality)} />
-              <MetricRow label="Aktive alarmer" value={String(relatedAlarms.length)} />
-              <MetricRow label="Anbefaling" value={activeTransformerAlarm ? activeTransformerAlarm.message : "Ingen aktive tiltak"} />
-            </>
-          ) : null}
-        </div>
-
-        {impactSummary ? (
-          <>
-            <div className="subpanel">
-              <h3>Forsyningsvei</h3>
-              <RouteSummary pathIds={impactSummary.pathIds} />
-            </div>
-
-            <div className="subpanel">
-              <h3>Nettkonsekvens</h3>
-              <div className="impact-grid">
-                <ImpactStat label="Nedstrøms kunder" value={formatValue(impactSummary.totalCustomers)} accent />
-                <ImpactStat label="Kritiske kunder" value={formatValue(impactSummary.criticalCustomers)} />
-                <ImpactStat label="Feedere inne" value={formatValue(impactSummary.energizedFeederCount)} />
-                <ImpactStat label="Feedere ute" value={formatValue(impactSummary.deenergizedFeederCount)} />
-              </div>
-              <p className="impact-note">
-                Område: {impactSummary.downstreamFeederIds.join(", ") || "Ingen nedstrøms grener"}.
-              </p>
-            </div>
-          </>
-        ) : null}
-      </section>
+  if (isStationBreaker(resolvedAssetId)) {
+    return (
+      <StationBreakerPanel
+        snapshot={snapshot}
+        topology={topology}
+        alarms={alarms}
+        selectedAssetId={resolvedAssetId}
+        lastCommandResult={lastCommandResult}
+        busy={busy}
+        onOpenBreaker={onOpenBreaker}
+        onCloseBreaker={onCloseBreaker}
+        onAcknowledgeAll={onAcknowledgeAll}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+      />
     );
   }
 
@@ -223,14 +528,21 @@ export function SelectedObjectPanel({
   const impactSummary = getTopologyImpactSummary(topology, snapshot, selectedFeeder.id);
   const commandPreviews = getFeederCommandPreviews(selectedFeeder, snapshot);
   const liveInterlocks: string[] = [];
+  const overloadStillActive = selectedFeeder.derived.utilizationPercent >= selectedFeeder.protection.warningPercent;
+  const needsTripAcknowledgement = relatedAlarms.some(
+    (alarm) => alarm.title === "Breaker tripped" && alarm.state !== "acknowledged",
+  );
 
-  if (feeder.quality !== "good") {
-    liveInterlocks.push(`Datakvalitet er ${getQualityLabel(feeder.quality).toLowerCase()}.`);
+  if (selectedFeeder.quality !== "good") {
+    liveInterlocks.push(`Datakvalitet er ${getQualityLabel(selectedFeeder.quality).toLowerCase()}.`);
   }
-  if (feeder.breakerStatus === "tripped") {
-    liveInterlocks.push("Bryteren er utløst og krever konservativ gjeninnkobling.");
+  if (selectedFeeder.breakerStatus === "tripped" && needsTripAcknowledgement) {
+    liveInterlocks.push("Bryteren er utløst. Trip-alarmen må kvitteres før gjeninnkobling vurderes.");
   }
-  if (control && control.faultMode !== "normal" && control.faultMode !== "planned_outage") {
+  if (control?.faultMode === "overload" && overloadStillActive) {
+    liveInterlocks.push("Overlast er fortsatt aktiv. Lasten må ned under varselgrensen før bryteren kan lukkes.");
+  }
+  if (control && control.faultMode !== "normal" && control.faultMode !== "planned_outage" && control.faultMode !== "overload") {
     liveInterlocks.push(`Aktiv feilmodus: ${getFaultModeLabel(control.faultMode).toLowerCase()}.`);
   }
   if (relatedAlarms.some((alarm) => alarm.severity === "critical" && alarm.state !== "acknowledged")) {
@@ -300,7 +612,8 @@ export function SelectedObjectPanel({
               label="Strøm maks"
               value={`${formatValue(Math.max(feeder.current.l1, feeder.current.l2, feeder.current.l3), 0)} A`}
             />
-            <MetricRow label="Spenning L2" value={`${formatValue(feeder.voltage.l2, 0)} V`} />
+            <MetricRow label="Spenning min/max" value={formatVoltageRangeLabel(feeder.voltage, 0)} />
+            <MetricRow label="Faseubalanse" value={`${formatValue(feeder.derived.phaseImbalancePercent, 1)} %`} />
             <MetricRow label="Kunder tilknyttet" value={formatValue(feeder.customers)} />
             <MetricRow label="Kritiske kunder" value={formatValue(feeder.criticalCustomers)} />
             <MetricRow label="Siste endring" value={formatTime(feeder.timestamp)} />
@@ -339,6 +652,22 @@ export function SelectedObjectPanel({
                 {feeder.customers} kunder på feeder, {feeder.criticalCustomers} kritiske kunder.
               </p>
             </div>
+            {feeder.breakerStatus === "tripped" ? (
+              <div className={`command-result ${overloadStillActive || needsTripAcknowledgement ? "blocked" : "allowed"}`}>
+                <strong>
+                  {overloadStillActive || needsTripAcknowledgement
+                    ? "Gjeninnkobling sperret"
+                    : "Gjeninnkobling klar for vurdering"}
+                </strong>
+                <p>
+                  {overloadStillActive
+                    ? "Lasten er fortsatt for høy. Senk belastningen til overlastalarmen forsvinner før du lukker bryteren."
+                    : needsTripAcknowledgement
+                      ? "Trip-alarmen må kvitteres før gjeninnkobling vurderes."
+                      : "Trip-tilstanden er ryddet. Bryteren kan lukkes etter vanlig operatørvurdering."}
+                </p>
+              </div>
+            ) : null}
             {relatedCommand ? (
               <div className={`command-result ${relatedCommand.allowed ? "allowed" : "blocked"}`}>
                 <strong>{relatedCommand.allowed ? "Kommando utført" : "Kommando blokkert"}</strong>

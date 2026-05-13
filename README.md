@@ -1,100 +1,122 @@
-# mini-grid-scada
+# Tensio Demo SCADA
+
+![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0F172A?logo=fastapi&logoColor=00C7B7)
+![React](https://img.shields.io/badge/React-0F172A?logo=react&logoColor=61DAFB)
+![TypeScript](https://img.shields.io/badge/TypeScript-0F172A?logo=typescript&logoColor=3178C6)
+![Status](https://img.shields.io/badge/Status-First%20release-8ddf57)
 
 SCADA-inspired operator dashboard for a simulated low-voltage distribution station.
 
-The project is intentionally built as a portfolio/demo system for grid monitoring, alarms, event logging, simulator-driven scenarios and safe command handling. It must not be used to control real electrical equipment.
+This repository is built as a portfolio and demo project for grid monitoring, switching awareness, alarm handling, replay, and simulator-driven operator workflows. It is intentionally local, self-contained, and safe: it must never be connected to or used for real electrical control.
 
-## Architecture
+## UI Preview
 
-The working architecture plan lives in [docs/architecture.md](docs/architecture.md).
+![Dashboard overview](docs/images/ui-dashboard-overview.png)
 
-Current direction:
+![Full dashboard with replay and incident center](docs/images/ui-dashboard-full.png)
 
-- `FastAPI` backend as system-of-record for topology, telemetry, alarms, commands and dashboard payloads
+## What This Project Demonstrates
+
+- A live operator dashboard with a single-line diagram, selected-object detail, alarms, event log, trends, replay, and incident guidance
+- A backend that owns topology, telemetry snapshots, alarm state, conservative switching logic, and report data
+- A simulator that can run steady-state profiles, timed operating events, and explicit fault scenarios
+- Safe command handling with interlocks, audit trail, and impact-aware switching flows
+- A frontend that stays responsive while telemetry, alarms, and trend history update continuously
+
+## Core Capabilities
+
+### Operator View
+
+- SCADA-style dashboard layout with live system status and selected-object drilldown
+- SVG-based one-line diagram with feeder breakers, `BRK-IN`, `LV-BRK`, transformer path, and energized/de-energized route styling
+- Object-centric trends with per-chart time windows and hover tooltip readout
+- Replay timeline with event filtering, stepping, and jump-to-live flow
+- Incident center with posture summary, impact, recommended actions, and focus objects
+
+### Simulation
+
+- Continuous normal profiles such as `weekday`, `winter_day`, `weekend`, and `overcast`
+- Timed overlays such as school start, EV rush, cloud front, and evening peak
+- Explicit fault scenarios including EV peak, phase imbalance, comms loss, breaker trip, and high solar
+- Manual feeder controls for load, reactive power, phase imbalance, breaker state, communications quality, and solar production
+
+### Switching and Interlocks
+
+- Conservative `open-breaker` / `close-breaker` command flow
+- Operator reason and impact confirmation for switching
+- Interlocks for active faults, degraded telemetry, and unacknowledged critical alarms
+- Station-level breaker modeling for `BRK-IN` and `LV-BRK`
+- Command outcomes written back into the event log and dashboard state
+
+### Reporting
+
+- Markdown incident report export from the UI
+- Report content includes system posture, customer impact, telemetry quality, recommended actions, active alarms, and recent timeline
+
+## Architecture At A Glance
+
+The detailed plan lives in [docs/architecture.md](docs/architecture.md).
+
+Current runtime shape:
+
+- `FastAPI` backend as system-of-record for topology, telemetry, alarms, commands, replay data, and reporting
 - `React + Vite + TypeScript` frontend for the operator GUI
-- `Python` simulator for feeder load, solar export, power quality and scenario injection
-- `WebSocket` dashboard updates with polling fallback
-- `Normal profiles` plus timed event overlays for realistic feeder behavior over time
-- `Independent trend windows` per chart through a dedicated trends API
-- `MQTT` kept as a later architecture step, not an MVP dependency
+- `Python` simulator for steady-state profiles, timed events, and fault injection
+- `WebSocket` dashboard streaming with polling fallback
+- `REST` endpoints for commands, trends, simulator control, and snapshots
+- `MQTT` intentionally deferred as a later ingestion option, not an MVP dependency
 
-## What Works Now
-
-The repository already contains a functional end-to-end demo skeleton:
-
-- live dashboard payload from backend to frontend
-- responsive SCADA-style operator GUI
-- single-line diagram with breaker states, transformer feed and feeder cards
-- active alarms, event log and selected-object panel
-- scenario controls for EV peak, phase imbalance, comms loss, breaker trip and high solar
-- continuous normal profiles such as weekday, winter weekday and weekend
-- timed operating events such as EV rush, school start and cloud cover
-- manual feeder controls for load, reactive power, breaker state, quality and solar
-- interlocked open/close breaker commands
-- trend charts for voltage, current and transformer load with per-chart time windows
-- report export from the frontend
-- backend tests for alarms, scenarios and command behavior
-
-## Repo Layout
+## Project Structure
 
 ```text
-backend/        FastAPI app, routes, services, tests
-frontend/       React/Vite operator UI
-simulator/      Grid simulation logic and scenario definitions
+backend/        FastAPI app, domain models, services, routes, tests
+frontend/       React/Vite operator dashboard
+simulator/      Simulation logic, profiles, scenarios, topology seed
+docs/           Architecture notes and README images
 sample_data/    Default control inputs and seed values
-docs/           Architecture and planning
-tools/          Local helper wrappers
 ```
 
 ## Quick Start
 
-### 1. Backend
-
-Create a virtual environment and install the backend package:
+### 1. Create a virtual environment
 
 ```powershell
 python -m venv .venv
+.\.venv\Scripts\python -m pip install --upgrade pip
+```
+
+### 2. Install backend dependencies
+
+```powershell
 .\.venv\Scripts\python -m pip install -e .\backend[dev]
 ```
 
-Start the API:
+### 3. Start the backend
 
 ```powershell
 .\.venv\Scripts\python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Useful endpoints:
+Useful API endpoints:
 
 - `GET http://127.0.0.1:8000/api/dashboard`
+- `GET http://127.0.0.1:8000/api/status`
 - `GET http://127.0.0.1:8000/api/trends`
 - `GET http://127.0.0.1:8000/api/topology`
 - `GET http://127.0.0.1:8000/api/alarms/active`
 - `POST http://127.0.0.1:8000/api/commands/open-breaker`
 - `POST http://127.0.0.1:8000/api/commands/close-breaker`
-- `POST http://127.0.0.1:8000/api/simulator/profiles/weekday/activate`
-- `POST http://127.0.0.1:8000/api/simulator/events/ev_rush_10m/activate`
-- `POST http://127.0.0.1:8000/api/simulator/scenarios/ev_peak/activate`
+- `POST http://127.0.0.1:8000/api/simulator/profiles/{profile_id}/activate`
+- `POST http://127.0.0.1:8000/api/simulator/events/{event_id}/activate`
+- `POST http://127.0.0.1:8000/api/simulator/scenarios/{scenario_id}/activate`
 - `POST http://127.0.0.1:8000/api/simulator/reset`
 
-### 2. Frontend
-
-Install dependencies:
+### 4. Start the frontend
 
 ```powershell
 cd frontend
 npm install
-```
-
-Start the dev server:
-
-```powershell
-npm run dev
-```
-
-If you want the frontend to target a different backend port during local testing:
-
-```powershell
-$env:VITE_API_BASE = "http://127.0.0.1:8001"
 npm run dev
 ```
 
@@ -102,34 +124,35 @@ The frontend runs on:
 
 - `http://127.0.0.1:5173/`
 
-## Command and Scenario Behavior
+If you want the frontend to target a different backend during local work:
 
-Current command handling is intentionally conservative:
+```powershell
+$env:VITE_API_BASE = "http://127.0.0.1:8001"
+npm run dev
+```
 
-- opening a breaker requires operator reason and impact confirmation
-- closing a breaker is blocked when telemetry quality is degraded, a trip/fault is still active, or a critical alarm remains unacknowledged
-- command outcomes are reflected back into the dashboard and event log
+## Operating Model
 
-Scenario handling supports both quick fault injection and return to baseline:
+### Normal Operation
 
-- choose a continuous normal profile as the live baseline
-- layer timed operating events on top of the active profile
-- activate a named scenario from the simulator panel
-- return to nominal operation with `Til normaltilstand`
-- keep trends and event history visible while scenarios run
+- Pick a normal profile as the live baseline
+- Add timed events on top of the active profile
+- Adjust feeder controls manually when you want to leave profile-driven operation
+- Return to nominal operation with `Til standardprofil`
 
-Trend handling is intentionally separate from the live dashboard snapshot:
+### Fault Exploration
 
-- the main dashboard payload returns a default recent trend window
-- the frontend can request custom windows per chart through `GET /api/trends`
-- each chart can independently show `5 min`, `15 min`, `30 min`, `1 t`, `3 t` or `6 t`
+- Run a named fault scenario from the simulator panel
+- Watch alarms, event log, trends, and topology update together
+- Step through the sequence in replay mode
+- Export an incident report when you want a written summary
 
-## Development Notes
+### Switching Philosophy
 
-- the backend depends on `websockets` so `/ws/dashboard` stays live instead of falling back to polling
-- the frontend is designed to stay lightweight and responsive even while trends and alarms update continuously
-- trend history is downsampled in the backend so longer windows stay responsive
-- SVG-based diagram symbols are used instead of bitmap assets so the single-line view stays sharp and easy to style
+- Feeder breakers and station breakers are modeled explicitly
+- Opening commands require operator reason and explicit impact confirmation
+- Closing commands are conservative and respect interlocks
+- Downstream conditions matter for `LV-BRK` and `BRK-IN`, not just feeder-local state
 
 ## Verification
 
@@ -146,11 +169,35 @@ cd frontend
 npm run build
 ```
 
-## Next Steps
+Release candidate verification used for this version:
 
-Planned next improvements:
+- `17 passed` backend tests
+- successful `npm run build`
+- live UI verified on `http://127.0.0.1:5173/`
+- README screenshots captured from the running local app
 
-- stronger energized/de-energized visualization through the whole one-line diagram
-- richer replay and timeline tooling
-- more detailed incident summary/report generation
-- optional MQTT ingestion path after the MVP core is stable
+## Current State
+
+Implemented in this first release:
+
+- live dashboard payload and UI rendering
+- object-aware trends with phase selection and hover values
+- replay timeline and incident center
+- station breaker support for `BRK-IN` and `LV-BRK`
+- topology-aware impact summaries and switching previews
+- simulator profiles, timed events, and fault scenarios
+- report export and event/audit flow
+
+## Roadmap
+
+Planned next development packages:
+
+- richer energized/de-energized styling all the way through the one-line diagram
+- improved station-level switching workflow and consequence preview
+- deeper replay tools with bookmarks and incident slicing
+- stronger report generation and shareable incident packages
+- optional MQTT ingestion path once the local core is fully stable
+
+## Safety Note
+
+This project is a software demo for simulated grid operations. It is not certified, hardened, or intended for real-world electrical control.

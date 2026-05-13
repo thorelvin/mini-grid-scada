@@ -12,6 +12,18 @@ interface TopBarProps {
   connectionStatus: ConnectionStatus;
 }
 
+function getTopAlarmIcon(title?: string | null): string {
+  if (!title) {
+    return "/assets/alarm-orbit.svg";
+  }
+
+  if (title.toLowerCase().includes("overload")) {
+    return "/assets/overload-warning.svg";
+  }
+
+  return "/assets/alarm-orbit.svg";
+}
+
 function ConnectionBadge({ connectionStatus }: { connectionStatus: ConnectionStatus }) {
   return (
     <span className={`status-indicator status-${connectionStatus}`}>
@@ -72,7 +84,7 @@ export function TopBar({ dashboard, connectionStatus }: TopBarProps) {
 
         <section className={`top-alarm-card ${highestAlarm ? `alarm-tone-${highestAlarm.severity}` : ""}`}>
           <div className="top-alarm-inner">
-            <img className="top-alarm-icon" src="/assets/alarm-orbit.svg" alt="" aria-hidden="true" />
+            <img className="top-alarm-icon" src={getTopAlarmIcon(highestAlarm?.title)} alt="" aria-hidden="true" />
             <div>
               <p className="stat-label">{highestAlarm ? getSeverityLabel(highestAlarm.severity) : "STATUS"}</p>
               <strong>{highestAlarm ? highestAlarm.title : "Ingen kritiske alarmer"}</strong>

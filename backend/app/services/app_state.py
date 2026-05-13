@@ -7,7 +7,7 @@ from math import ceil
 from uuid import uuid4
 
 from backend.app.config import settings
-from backend.app.domain.enums import AlarmState, BreakerStatus, CommandAction, FaultMode
+from backend.app.domain.enums import AlarmState, BreakerStatus, CommandAction, DataQuality, FaultMode
 from backend.app.domain.models import (
     ActiveTimedEvent,
     Alarm,
@@ -28,6 +28,7 @@ from backend.app.domain.models import (
     TimedEventSummary,
     TrendPoint,
     TrendSeries,
+    InterlockDecision,
 )
 from backend.app.services.command_service import evaluate_breaker_command
 from simulator.dynamics import (
@@ -101,7 +102,9 @@ def _build_trends(
     transformer_window_sec: int,
     max_points: int,
 ) -> DashboardTrends:
-    voltage_series: list[TrendSeries] = []
+    voltage_l1_series: list[TrendSeries] = []
+    voltage_l2_series: list[TrendSeries] = []
+    voltage_l3_series: list[TrendSeries] = []
     current_series: list[TrendSeries] = []
     voltage_history = _filter_history_window(history, voltage_window_sec)
     current_history = _filter_history_window(history, current_window_sec)
@@ -109,13 +112,17 @@ def _build_trends(
 
     feeder_ids = ("F1", "F2", "F3", "F4")
     for feeder_id in feeder_ids:
-        voltage_points: list[tuple[str, float]] = []
+        voltage_l1_points: list[tuple[str, float]] = []
+        voltage_l2_points: list[tuple[str, float]] = []
+        voltage_l3_points: list[tuple[str, float]] = []
         current_points: list[tuple[str, float]] = []
         for snapshot in voltage_history:
             feeder = next((item for item in snapshot.feeders if item.id == feeder_id), None)
             if feeder is None:
                 continue
-            voltage_points.append((snapshot.timestamp, feeder.voltage.l2))
+            voltage_l1_points.append((snapshot.timestamp, feeder.voltage.l1))
+            voltage_l2_points.append((snapshot.timestamp, feeder.voltage.l2))
+            voltage_l3_points.append((snapshot.timestamp, feeder.voltage.l3))
         for snapshot in current_history:
             feeder = next((item for item in snapshot.feeders if item.id == feeder_id), None)
             if feeder is None:
@@ -127,12 +134,32 @@ def _build_trends(
                 )
             )
 
-        voltage_series.append(
+        voltage_l1_series.append(
             _trend_series(
                 series_id=feeder_id,
                 label=feeder_id,
                 unit="V",
-                values=_downsample_values(voltage_points, max_points),
+                values=_downsample_values(voltage_l1_points, max_points),
+                threshold_low=207.0,
+                threshold_high=253.0,
+            )
+        )
+        voltage_l2_series.append(
+            _trend_series(
+                series_id=feeder_id,
+                label=feeder_id,
+                unit="V",
+                values=_downsample_values(voltage_l2_points, max_points),
+                threshold_low=207.0,
+                threshold_high=253.0,
+            )
+        )
+        voltage_l3_series.append(
+            _trend_series(
+                series_id=feeder_id,
+                label=feeder_id,
+                unit="V",
+                values=_downsample_values(voltage_l3_points, max_points),
                 threshold_low=207.0,
                 threshold_high=253.0,
             )
@@ -161,7 +188,9 @@ def _build_trends(
     ]
 
     return DashboardTrends(
-        voltageL2=voltage_series,
+        voltageL1=voltage_l1_series,
+        voltageL2=voltage_l2_series,
+        voltageL3=voltage_l3_series,
         currentMax=current_series,
         transformerLoad=transformer_series,
     )
@@ -204,6 +233,10 @@ class AppState:
         self._active_scenario_started_at = self._system_started_at
         self._last_command_result: CommandResult | None = None
         self._latched_trip_reasons: dict[str, str] = {}
+        self._station_breakers: dict[str, BreakerStatus] = {
+            "BRK-IN": BreakerStatus.CLOSED,
+            "LV-BRK": BreakerStatus.CLOSED,
+        }
 
         self._events.append(
             Event(
@@ -214,6 +247,13 @@ class AppState:
                 description="SCADA scaffold initialized.",
             )
         )
+
+    def _seed_custom_baseline_from_live_state_unlocked(self) -> None:
+        self._custom_base_controls = {
+            control.id: control.model_copy(deep=True)
+            for control in self._controls.values()
+        }
+        self._custom_base_settings = self._simulator_settings.model_copy(deep=True)
 
     async def set_simulator_running(self, running: bool) -> None:
         async with self._lock:
@@ -377,6 +417,10 @@ class AppState:
         async with self._lock:
             return list(self._controls.values())
 
+    async def get_station_breakers(self) -> dict[str, BreakerStatus]:
+        async with self._lock:
+            return dict(self._station_breakers)
+
     async def get_simulator_settings(self) -> SimulatorSettings:
         async with self._lock:
             return self._simulator_settings
@@ -417,6 +461,10 @@ class AppState:
             self._active_scenario_started_at = timestamp
             self._last_command_result = None
             self._latched_trip_reasons = {}
+            self._station_breakers = {
+                "BRK-IN": BreakerStatus.CLOSED,
+                "LV-BRK": BreakerStatus.CLOSED,
+            }
             self._events.appendleft(
                 Event(
                     id=f"evt-{uuid4().hex[:10]}",
@@ -511,6 +559,8 @@ class AppState:
     async def update_control(self, feeder_id: str, patch: FeederControlPatch) -> FeederControlInput:
         updates = patch.model_dump(exclude_none=True)
         async with self._lock:
+            if self._active_profile_id != "custom":
+                self._seed_custom_baseline_from_live_state_unlocked()
             control = self._custom_base_controls.get(feeder_id) if self._active_profile_id == "custom" else self._controls.get(feeder_id)
             if control is None:
                 raise KeyError(feeder_id)
@@ -543,8 +593,126 @@ class AppState:
         request: BreakerCommandRequest,
     ) -> CommandResult:
         async with self._lock:
+            if self._active_profile_id != "custom":
+                self._seed_custom_baseline_from_live_state_unlocked()
             if self._snapshot is None:
                 raise RuntimeError("Snapshot has not been initialized yet.")
+
+            if request.objectId in self._station_breakers:
+                current_status = self._station_breakers[request.objectId]
+                object_name = "Inntaksbryter" if request.objectId == "BRK-IN" else "Lavspent hovedbryter"
+                downstream_feeders = list(self._snapshot.feeders)
+                affected_customers = sum(
+                    feeder.customers for feeder in downstream_feeders if feeder.breakerStatus == BreakerStatus.CLOSED
+                )
+                critical_customers = sum(
+                    feeder.criticalCustomers
+                    for feeder in downstream_feeders
+                    if feeder.breakerStatus == BreakerStatus.CLOSED
+                )
+                reasons: list[str] = []
+
+                if action == CommandAction.OPEN_BREAKER:
+                    if current_status != BreakerStatus.CLOSED:
+                        reasons.append("Opening blocked: breaker is not currently closed.")
+                    if not request.reason or not request.reason.strip():
+                        reasons.append("Opening blocked: an operator reason is required.")
+                    if affected_customers > 0 and not request.confirmImpact:
+                        reasons.append(
+                            f"Opening blocked: confirm that {affected_customers} customers will be disconnected."
+                        )
+                else:
+                    if current_status == BreakerStatus.CLOSED:
+                        reasons.append("Closing blocked: breaker is already closed.")
+                    if request.objectId == "LV-BRK" and self._station_breakers["BRK-IN"] != BreakerStatus.CLOSED:
+                        reasons.append("Closing blocked: BRK-IN must be closed before LV-BRK can be energized.")
+                    if any(
+                        alarm.severity == "critical" and alarm.state != AlarmState.ACKNOWLEDGED
+                        for alarm in self._active_alarms
+                    ):
+                        reasons.append("Closing blocked: an unacknowledged critical alarm is active downstream.")
+
+                    degraded_downstream = [
+                        control.id
+                        for control in self._controls.values()
+                        if control.breakerStatus == BreakerStatus.CLOSED
+                        and control.communicationState in {DataQuality.STALE, DataQuality.INVALID, DataQuality.LOST}
+                    ]
+                    if degraded_downstream:
+                        reasons.append(
+                            "Closing blocked: telemetry is degraded on downstream energized feeders "
+                            f"({', '.join(degraded_downstream)})."
+                        )
+
+                    unsafe_downstream = [
+                        control.id
+                        for control in self._controls.values()
+                        if control.faultMode in {FaultMode.OVERLOAD, FaultMode.FORCED_TRIP, FaultMode.SENSOR_FAULT}
+                    ]
+                    if unsafe_downstream:
+                        reasons.append(
+                            "Closing blocked: downstream feeders still carry active fault conditions "
+                            f"({', '.join(unsafe_downstream)})."
+                        )
+
+                allowed = not reasons
+                next_status = (
+                    BreakerStatus.OPEN if action == CommandAction.OPEN_BREAKER else BreakerStatus.CLOSED
+                ) if allowed else current_status
+                result = CommandResult(
+                    id=f"cmd-{uuid4().hex[:12]}",
+                    timestamp=_now_iso(),
+                    action=action,
+                    objectId=request.objectId,
+                    objectName=object_name,
+                    operator=request.operator,
+                    reason=request.reason,
+                    allowed=allowed,
+                    executed=allowed,
+                    message=(
+                        f"{request.objectId} {'opened' if action == CommandAction.OPEN_BREAKER else 'closed'} successfully."
+                        if allowed
+                        else reasons[0]
+                    ),
+                    breakerStatusBefore=current_status,
+                    breakerStatusAfter=next_status,
+                    interlock=InterlockDecision(
+                        allowed=allowed,
+                        reasons=reasons,
+                        affectedCustomers=affected_customers,
+                        criticalCustomers=critical_customers,
+                    ),
+                )
+
+                if result.allowed:
+                    self._station_breakers[request.objectId] = result.breakerStatusAfter
+                    self._active_profile_id = "custom"
+                    self._active_profile_started_at = result.timestamp
+                    self._active_timed_events = []
+                    self._active_scenario_id = "custom"
+                    self._active_scenario_started_at = result.timestamp
+                    self._events.appendleft(
+                        Event(
+                            id=f"evt-{uuid4().hex[:10]}",
+                            timestamp=result.timestamp,
+                            type="command_executed",
+                            source=request.objectId,
+                            description=f"Station command executed: {result.action} by {request.operator}.",
+                        )
+                    )
+                else:
+                    self._events.appendleft(
+                        Event(
+                            id=f"evt-{uuid4().hex[:10]}",
+                            timestamp=result.timestamp,
+                            type="command_blocked",
+                            source=request.objectId,
+                            description=f"Command blocked: {result.message}",
+                        )
+                    )
+
+                self._last_command_result = result
+                return result
 
             feeder = next((item for item in self._snapshot.feeders if item.id == request.objectId), None)
             if feeder is None:
@@ -609,6 +777,8 @@ class AppState:
     async def update_simulator_settings(self, patch: SimulatorSettingsPatch) -> SimulatorSettings:
         updates = patch.model_dump(exclude_none=True)
         async with self._lock:
+            if self._active_profile_id != "custom":
+                self._seed_custom_baseline_from_live_state_unlocked()
             self._custom_base_settings = self._simulator_settings.model_copy(update=updates)
             self._simulator_settings = self._custom_base_settings
             self._active_profile_id = "custom"
@@ -635,6 +805,10 @@ class AppState:
                 baseline_settings=self._simulator_settings,
             )
             self._latched_trip_reasons = {}
+            self._station_breakers = {
+                "BRK-IN": BreakerStatus.CLOSED,
+                "LV-BRK": BreakerStatus.CLOSED,
+            }
             self._custom_base_controls = {control.id: control.model_copy(deep=True) for control in next_controls}
             self._custom_base_settings = next_settings.model_copy(deep=True)
             self._controls = {control.id: control for control in next_controls}

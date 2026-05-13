@@ -122,11 +122,20 @@ export interface TransformerTelemetry {
   quality: DataQuality;
 }
 
+export interface StationBreakerTelemetry {
+  id: string;
+  name: string;
+  timestamp: string;
+  breakerStatus: BreakerStatus;
+  quality: DataQuality;
+}
+
 export interface StationSnapshot {
   stationId: string;
   timestamp: string;
   mode: string;
   transformer: TransformerTelemetry;
+  stationBreakers: StationBreakerTelemetry[];
   feeders: FeederTelemetry[];
 }
 
@@ -198,7 +207,9 @@ export interface TrendSeries {
 }
 
 export interface DashboardTrends {
+  voltageL1: TrendSeries[];
   voltageL2: TrendSeries[];
+  voltageL3: TrendSeries[];
   currentMax: TrendSeries[];
   transformerLoad: TrendSeries[];
 }

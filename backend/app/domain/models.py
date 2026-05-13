@@ -149,11 +149,20 @@ class TransformerTelemetry(DomainModel):
     quality: DataQuality
 
 
+class StationBreakerTelemetry(DomainModel):
+    id: str
+    name: str
+    timestamp: str
+    breakerStatus: BreakerStatus
+    quality: DataQuality
+
+
 class StationSnapshot(DomainModel):
     stationId: str
     timestamp: str
     mode: str
     transformer: TransformerTelemetry
+    stationBreakers: list[StationBreakerTelemetry] = Field(default_factory=list)
     feeders: list[FeederTelemetry]
 
 
@@ -198,7 +207,9 @@ class TrendSeries(DomainModel):
 
 
 class DashboardTrends(DomainModel):
+    voltageL1: list[TrendSeries]
     voltageL2: list[TrendSeries]
+    voltageL3: list[TrendSeries]
     currentMax: list[TrendSeries]
     transformerLoad: list[TrendSeries]
 

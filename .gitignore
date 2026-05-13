@@ -12,3 +12,5 @@ dist/
 .runtime/
 .logs/
 .DS_Store
+frontend/.env.local
+.tmp-backend-*.txt
