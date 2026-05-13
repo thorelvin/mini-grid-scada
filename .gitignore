@@ -13,4 +13,5 @@ dist/
 .logs/
 .DS_Store
 frontend/.env.local
+frontend/.vite/
 .tmp-backend-*.txt
