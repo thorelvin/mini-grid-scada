@@ -45,6 +45,12 @@ NORMAL_PROFILE_LIBRARY: dict[str, dict[str, object]] = {
                 "solar": [(0.0, 0.08), (0.18, 0.42), (0.5, 1.08), (0.78, 0.38), (1.0, 0.08)],
                 "imbalance": [(0.0, 2.0), (0.5, 3.4), (1.0, 2.0)],
             },
+            "F5": {
+                "load": [(0.0, 0.92), (0.4, 0.84), (0.76, 0.9), (1.0, 0.92)],
+                "reactive": [(0.0, 1.0), (1.0, 1.0)],
+                "solar": [(0.0, 0.92), (0.24, 0.98), (0.52, 1.06), (0.82, 0.96), (1.0, 0.92)],
+                "imbalance": [(0.0, 1.8), (1.0, 1.8)],
+            },
         },
     },
     "winter_day": {
@@ -76,6 +82,12 @@ NORMAL_PROFILE_LIBRARY: dict[str, dict[str, object]] = {
                 "reactive": [(0.0, 1.0), (1.0, 1.0)],
                 "solar": [(0.0, 0.02), (0.28, 0.12), (0.52, 0.28), (0.76, 0.08), (1.0, 0.02)],
                 "imbalance": [(0.0, 2.0), (1.0, 2.0)],
+            },
+            "F5": {
+                "load": [(0.0, 0.94), (0.44, 0.9), (1.0, 0.94)],
+                "reactive": [(0.0, 1.0), (1.0, 1.0)],
+                "solar": [(0.0, 1.04), (0.22, 1.1), (0.56, 1.18), (0.82, 1.08), (1.0, 1.04)],
+                "imbalance": [(0.0, 1.6), (1.0, 1.6)],
             },
         },
     },
@@ -109,6 +121,12 @@ NORMAL_PROFILE_LIBRARY: dict[str, dict[str, object]] = {
                 "solar": [(0.0, 0.1), (0.26, 0.46), (0.52, 1.02), (0.8, 0.32), (1.0, 0.1)],
                 "imbalance": [(0.0, 2.1), (1.0, 2.1)],
             },
+            "F5": {
+                "load": [(0.0, 0.88), (0.38, 0.82), (0.7, 0.9), (1.0, 0.88)],
+                "reactive": [(0.0, 1.0), (1.0, 1.0)],
+                "solar": [(0.0, 0.94), (0.28, 1.0), (0.54, 1.08), (0.82, 0.98), (1.0, 0.94)],
+                "imbalance": [(0.0, 1.7), (1.0, 1.7)],
+            },
         },
     },
     "overcast": {
@@ -140,6 +158,12 @@ NORMAL_PROFILE_LIBRARY: dict[str, dict[str, object]] = {
                 "reactive": [(0.0, 1.0), (1.0, 1.0)],
                 "solar": [(0.0, 0.06), (0.18, 0.22), (0.3, 0.54), (0.42, 0.18), (0.56, 0.62), (0.7, 0.26), (1.0, 0.06)],
                 "imbalance": [(0.0, 2.2), (1.0, 2.2)],
+            },
+            "F5": {
+                "load": [(0.0, 0.9), (0.42, 0.84), (0.74, 0.92), (1.0, 0.9)],
+                "reactive": [(0.0, 1.0), (1.0, 1.0)],
+                "solar": [(0.0, 0.96), (0.22, 1.04), (0.38, 0.86), (0.58, 1.08), (0.78, 0.92), (1.0, 0.96)],
+                "imbalance": [(0.0, 1.9), (1.0, 1.9)],
             },
         },
     },
@@ -199,6 +223,7 @@ TIMED_EVENT_LIBRARY: dict[str, dict[str, object]] = {
         "rampOutSec": 120,
         "effects": {
             "F4": {"solarMultiplier": 0.24, "loadMultiplier": 1.06},
+            "F5": {"solarMultiplier": 0.88},
         },
     },
     "evening_peak_60m": {
@@ -213,6 +238,7 @@ TIMED_EVENT_LIBRARY: dict[str, dict[str, object]] = {
         "effects": {
             "F1": {"loadMultiplier": 1.24, "reactiveMultiplier": 1.14, "phaseImbalanceDelta": 1.6},
             "F3": {"loadMultiplier": 1.18, "reactiveMultiplier": 1.08},
+            "F5": {"solarMultiplier": 1.04},
         },
         "ambientTempDelta": -1.0,
     },

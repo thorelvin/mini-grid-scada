@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timedelta
 
 from backend.app.domain.models import NormalProfileSummary, ScenarioSummary, TimedEventSummary
 from backend.app.services.alarm_service import evaluate_snapshot
@@ -20,6 +21,24 @@ def _build_state() -> AppState:
 
 
 async def _refresh_state(app_state: AppState) -> None:
+    await app_state.advance_dynamic_state()
+    controls = await app_state.get_controls()
+    simulator_settings = await app_state.get_simulator_settings()
+    snapshot = build_snapshot(
+        station_id="NST-001",
+        mode="simulation",
+        controls=controls,
+        ambient_temp_c=simulator_settings.ambientTempC,
+        nominal_phase_voltage_v=230.0,
+        nominal_line_voltage_v=400.0,
+        transformer_rating_kva=1250.0,
+    )
+    alarms = evaluate_snapshot(snapshot)
+    await app_state.update_frame(snapshot, alarms)
+
+
+async def _refresh_state_at(app_state: AppState, now: str) -> None:
+    await app_state.advance_dynamic_state(now=now)
     controls = await app_state.get_controls()
     simulator_settings = await app_state.get_simulator_settings()
     snapshot = build_snapshot(
@@ -39,7 +58,8 @@ def test_acknowledge_all_alarms_marks_unacknowledged_entries():
     async def run():
         app_state = _build_state()
         await app_state.apply_scenario("ev_peak")
-        await _refresh_state(app_state)
+        scenario_started_at = datetime.fromisoformat(app_state._active_scenario_started_at) + timedelta(minutes=3)
+        await _refresh_state_at(app_state, scenario_started_at.isoformat())
 
         updated = await app_state.acknowledge_alarms()
         alarms = await app_state.get_active_alarms()
@@ -54,7 +74,8 @@ def test_acknowledge_alarms_can_be_scoped_to_one_object():
     async def run():
         app_state = _build_state()
         await app_state.apply_scenario("phase_imbalance")
-        await _refresh_state(app_state)
+        scenario_started_at = datetime.fromisoformat(app_state._active_scenario_started_at) + timedelta(minutes=2)
+        await _refresh_state_at(app_state, scenario_started_at.isoformat())
 
         updated = await app_state.acknowledge_alarms(object_id="F1")
         alarms = await app_state.get_active_alarms()

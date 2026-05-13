@@ -38,6 +38,16 @@ def build_demo_topology(station_id: str) -> StationTopology:
         Asset(id="F2", name=FEEDER_PROFILES["F2"]["name"], kind=AssetKind.FEEDER, parentId="BUS-01"),
         Asset(id="F3", name=FEEDER_PROFILES["F3"]["name"], kind=AssetKind.FEEDER, parentId="BUS-01"),
         Asset(id="F4", name=FEEDER_PROFILES["F4"]["name"], kind=AssetKind.FEEDER, parentId="BUS-01"),
+        Asset(
+            id="F5",
+            name=FEEDER_PROFILES["F5"]["name"],
+            kind=AssetKind.FEEDER,
+            parentId="BUS-01",
+            metadata={
+                "nominalHomesSupplied": int(FEEDER_PROFILES["F5"].get("nominalHomesSupplied", 0)),
+                "householdEquivalentKw": float(FEEDER_PROFILES["F5"].get("householdEquivalentKw", 0.0)),
+            },
+        ),
     ]
 
     edges = [
@@ -49,6 +59,7 @@ def build_demo_topology(station_id: str) -> StationTopology:
         TopologyEdge(sourceId="BUS-01", targetId="F2", relation="supplies"),
         TopologyEdge(sourceId="BUS-01", targetId="F3", relation="supplies"),
         TopologyEdge(sourceId="BUS-01", targetId="F4", relation="supplies"),
+        TopologyEdge(sourceId="BUS-01", targetId="F5", relation="supplies"),
     ]
 
     return StationTopology(stationId=station_id, assets=assets, edges=edges)
@@ -63,7 +74,7 @@ def create_default_controls() -> list[FeederControlInput]:
                 id=feeder_id,
                 loadKw=float(profile["defaultLoadKw"]),
                 reactivePowerKvar=float(profile["defaultReactivePowerKvar"]),
-                phaseImbalancePercent=6.0 if feeder_id == "F1" else 3.0,
+                phaseImbalancePercent=6.0 if feeder_id == "F1" else 2.0 if feeder_id == "F5" else 3.0,
                 solarKw=float(profile.get("defaultSolarKw", 0.0)),
             )
         )
@@ -162,6 +173,15 @@ def _build_feeder_telemetry(
         display_utilization = (
             potential_utilization if control.faultMode == FaultMode.OVERLOAD or last_trip_reason == "overload" else 0.0
         )
+    household_equivalent_kw = float(profile.get("householdEquivalentKw", 0.0) or 0.0)
+    nominal_generation_homes = (
+        int(profile["nominalHomesSupplied"]) if profile.get("nominalHomesSupplied") is not None else None
+    )
+    generation_equivalent_homes = (
+        int(round(max(-net_kw, 0.0) / household_equivalent_kw))
+        if household_equivalent_kw > 0
+        else None
+    )
     avg_voltage = (voltage.l1 + voltage.l2 + voltage.l3) / 3 if breaker_status == BreakerStatus.CLOSED else 0.0
     voltage_deviation = ((nominal_phase_voltage_v - avg_voltage) / nominal_phase_voltage_v) * 100 if avg_voltage else 100.0
 
@@ -190,6 +210,8 @@ def _build_feeder_telemetry(
         reactivePowerKvar=round(reactive_kvar, 1),
         customers=int(profile["customers"]),
         criticalCustomers=int(profile["criticalCustomers"]),
+        generationEquivalentHomes=generation_equivalent_homes,
+        nominalGenerationEquivalentHomes=nominal_generation_homes,
         quality=quality,
         protection=protection,
         derived=DerivedMetrics(

@@ -46,7 +46,6 @@ export function AlarmList({
               <span>Tid</span>
               <span>Pri</span>
               <span>Alarm</span>
-              <span>Obj</span>
               <span>Stat</span>
               <span>Kvitt</span>
             </div>
@@ -58,14 +57,13 @@ export function AlarmList({
                   type="button"
                   className={`table-row alarm-table ${selectedAssetId === alarm.objectId ? "selected" : ""}`}
                   onClick={() => onSelectAsset(alarm.objectId)}
-                >
+                  >
                   <span>{formatTime(alarm.createdAt)}</span>
                   <span className={`severity-badge severity-${alarm.severity}`}>{getSeverityLabel(alarm.severity)}</span>
                   <span className="row-primary">
-                    <strong>{alarm.title}</strong>
+                    <strong>{alarm.objectId} - {alarm.title}</strong>
                     <small>{alarm.message}</small>
                   </span>
-                  <span>{alarm.objectId}</span>
                   <span className={`state-label state-${alarm.state}`}>{getAlarmStateLabel(alarm.state)}</span>
                   <span>
                     {alarm.state !== "acknowledged" && !readOnly ? (

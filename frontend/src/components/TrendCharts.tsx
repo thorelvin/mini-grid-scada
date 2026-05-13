@@ -19,7 +19,7 @@ interface TrendChartsProps {
   snapshot?: StationSnapshot | null;
 }
 
-type TrendMetricKey = "voltage" | "currentMax" | "transformerLoad";
+type TrendMetricKey = "voltage" | "currentMax" | "activePower" | "transformerLoad";
 type TrendWindowState = Record<TrendMetricKey, number>;
 type TrendScopeMode = "selected" | "overview";
 type VoltagePhase = "l1" | "l2" | "l3" | "all";
@@ -42,6 +42,26 @@ interface HoveredTrendState {
 
 const DEFAULT_TREND_WINDOW_SEC = 15 * 60;
 const TREND_WINDOW_OPTIONS = [5 * 60, 15 * 60, 30 * 60, 60 * 60, 3 * 60 * 60, 6 * 60 * 60];
+
+function isGenerationSupportFeeder(snapshotFeeder: StationSnapshot["feeders"][number] | null): boolean {
+  return !!snapshotFeeder && snapshotFeeder.customers === 0 && (snapshotFeeder.nominalGenerationEquivalentHomes ?? 0) > 0;
+}
+
+function getSupportHomesLabel(snapshotFeeder: StationSnapshot["feeders"][number]): string {
+  const currentHomes = snapshotFeeder.generationEquivalentHomes ?? 0;
+  const nominalHomes = snapshotFeeder.nominalGenerationEquivalentHomes ?? currentHomes;
+  return `${formatValue(currentHomes)} av ca. ${formatValue(nominalHomes)} boliger`;
+}
+
+function getPowerModeLabel(activePowerKw: number): string {
+  if (activePowerKw < -0.5) {
+    return "Eksporterer lokalt";
+  }
+  if (activePowerKw > 0.5) {
+    return "Trekker fra nettet";
+  }
+  return "Noytral drift";
+}
 
 function buildPath(
   points: TrendSeries["points"],
@@ -495,6 +515,7 @@ export function TrendCharts({
   const [trendWindows, setTrendWindows] = useState<TrendWindowState>({
     voltage: DEFAULT_TREND_WINDOW_SEC,
     currentMax: DEFAULT_TREND_WINDOW_SEC,
+    activePower: DEFAULT_TREND_WINDOW_SEC,
     transformerLoad: DEFAULT_TREND_WINDOW_SEC,
   });
   const [customTrends, setCustomTrends] = useState<DashboardTrends | null>(null);
@@ -503,6 +524,7 @@ export function TrendCharts({
   const [voltagePhase, setVoltagePhase] = useState<VoltagePhase>("l2");
 
   const selectedFeeder = snapshot?.feeders.find((feeder) => feeder.id === selectedAssetId) ?? null;
+  const selectedGenerationFeeder = isGenerationSupportFeeder(selectedFeeder) ? selectedFeeder : null;
   const supportsSelectedScope = !!selectedFeeder;
   const scopeLabel = selectedFeeder ? `${selectedFeeder.id} - ${selectedFeeder.name}` : "Stasjonsoversikt";
 
@@ -530,6 +552,7 @@ export function TrendCharts({
     void getTrends({
       voltageWindowSec: trendWindows.voltage,
       currentWindowSec: trendWindows.currentMax,
+      activePowerWindowSec: trendWindows.activePower,
       transformerWindowSec: trendWindows.transformerLoad,
     })
       .then((nextTrends) => {
@@ -564,10 +587,14 @@ export function TrendCharts({
     resolvedScopeMode === "selected" && selectedFeeder
       ? activeTrends?.currentMax.filter((series) => series.id === selectedFeeder.id) ?? []
       : activeTrends?.currentMax ?? [];
+  const scopedActivePowerSeries =
+    resolvedScopeMode === "selected" && selectedFeeder
+      ? activeTrends?.activePower.filter((series) => series.id === selectedFeeder.id) ?? []
+      : [];
   const scopedTransformerSeries = activeTrends?.transformerLoad ?? [];
   const hasTrendPoints =
     !!activeTrends &&
-    [...scopedVoltageSeries, ...scopedCurrentSeries, ...scopedTransformerSeries].some(
+    [...scopedVoltageSeries, ...scopedCurrentSeries, ...scopedActivePowerSeries, ...scopedTransformerSeries].some(
       (series) => series.points.length > 0,
     );
 
@@ -652,6 +679,30 @@ export function TrendCharts({
         </div>
       </div>
 
+      {selectedGenerationFeeder ? (
+        <div className="trend-support-strip">
+          <article className="trend-support-card">
+            <span>Netto effekt</span>
+            <strong>
+              {selectedGenerationFeeder.activePowerKw < 0
+                ? `${formatValue(Math.abs(selectedGenerationFeeder.activePowerKw), 0)} kW eksport`
+                : `${formatValue(selectedGenerationFeeder.activePowerKw, 0)} kW import`}
+            </strong>
+            <p>{getPowerModeLabel(selectedGenerationFeeder.activePowerKw)}</p>
+          </article>
+          <article className="trend-support-card">
+            <span>Kan forsyne ca.</span>
+            <strong>{getSupportHomesLabel(selectedGenerationFeeder)}</strong>
+            <p>Estimert lokal stotte fra Romstad Kraftverk akkurat na.</p>
+          </article>
+          <article className="trend-support-card">
+            <span>Reaktiv stotte</span>
+            <strong>{`${selectedGenerationFeeder.reactivePowerKvar < 0 ? "-" : ""}${formatValue(Math.abs(selectedGenerationFeeder.reactivePowerKvar), 0)} kVAr`}</strong>
+            <p>Brukes for a lese hvordan F5 stotter eller trekker pa spenningsnivaaet.</p>
+          </article>
+        </div>
+      ) : null}
+
       <div className="trend-layout">
         <LineChartCard
           title={getVoltageChartTitle(resolvedVoltagePhase)}
@@ -671,6 +722,17 @@ export function TrendCharts({
           isRefreshing={isRefreshing && hasCustomWindowSelection}
           focusTimestamp={focusTimestamp}
         />
+        {resolvedScopeMode === "selected" && selectedFeeder ? (
+          <LineChartCard
+            title={selectedGenerationFeeder ? "Netto produksjon" : "Aktiv effekt"}
+            unit="kW"
+            seriesCollection={scopedActivePowerSeries}
+            windowSec={trendWindows.activePower}
+            onWindowChange={(nextWindowSec) => updateWindow("activePower", nextWindowSec)}
+            isRefreshing={isRefreshing && hasCustomWindowSelection}
+            focusTimestamp={focusTimestamp}
+          />
+        ) : null}
         <LineChartCard
           title="Trafolast"
           unit="%"

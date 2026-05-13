@@ -30,10 +30,12 @@ async def get_trends(
     request: Request,
     voltage_window_sec: int | None = None,
     current_window_sec: int | None = None,
+    active_power_window_sec: int | None = None,
     transformer_window_sec: int | None = None,
 ):
     return await _state(request).get_trends(
         voltage_window_sec=voltage_window_sec,
         current_window_sec=current_window_sec,
+        active_power_window_sec=active_power_window_sec,
         transformer_window_sec=transformer_window_sec,
     )

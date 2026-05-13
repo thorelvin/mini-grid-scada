@@ -37,7 +37,7 @@ from simulator.dynamics import (
     apply_timed_events,
     sample_profile,
 )
-from simulator.scenarios import apply_scenario_to_baseline
+from simulator.scenarios import apply_scenario_overlay, get_scenario_progress, get_scenario_summary
 
 
 def _now_iso() -> str:
@@ -99,6 +99,7 @@ def _build_trends(
     history: list[StationSnapshot],
     voltage_window_sec: int,
     current_window_sec: int,
+    active_power_window_sec: int,
     transformer_window_sec: int,
     max_points: int,
 ) -> DashboardTrends:
@@ -106,16 +107,19 @@ def _build_trends(
     voltage_l2_series: list[TrendSeries] = []
     voltage_l3_series: list[TrendSeries] = []
     current_series: list[TrendSeries] = []
+    active_power_series: list[TrendSeries] = []
     voltage_history = _filter_history_window(history, voltage_window_sec)
     current_history = _filter_history_window(history, current_window_sec)
+    active_power_history = _filter_history_window(history, active_power_window_sec)
     transformer_history = _filter_history_window(history, transformer_window_sec)
 
-    feeder_ids = ("F1", "F2", "F3", "F4")
+    feeder_ids = tuple(feeder.id for feeder in history[-1].feeders) if history else ()
     for feeder_id in feeder_ids:
         voltage_l1_points: list[tuple[str, float]] = []
         voltage_l2_points: list[tuple[str, float]] = []
         voltage_l3_points: list[tuple[str, float]] = []
         current_points: list[tuple[str, float]] = []
+        active_power_points: list[tuple[str, float]] = []
         for snapshot in voltage_history:
             feeder = next((item for item in snapshot.feeders if item.id == feeder_id), None)
             if feeder is None:
@@ -133,6 +137,11 @@ def _build_trends(
                     max(feeder.current.l1, feeder.current.l2, feeder.current.l3),
                 )
             )
+        for snapshot in active_power_history:
+            feeder = next((item for item in snapshot.feeders if item.id == feeder_id), None)
+            if feeder is None:
+                continue
+            active_power_points.append((snapshot.timestamp, feeder.activePowerKw))
 
         voltage_l1_series.append(
             _trend_series(
@@ -172,6 +181,14 @@ def _build_trends(
                 values=_downsample_values(current_points, max_points),
             )
         )
+        active_power_series.append(
+            _trend_series(
+                series_id=feeder_id,
+                label=feeder_id,
+                unit="kW",
+                values=_downsample_values(active_power_points, max_points),
+            )
+        )
 
     transformer_values = [
         (snapshot.timestamp, snapshot.transformer.loadPercent)
@@ -192,6 +209,7 @@ def _build_trends(
         voltageL2=voltage_l2_series,
         voltageL3=voltage_l3_series,
         currentMax=current_series,
+        activePower=active_power_series,
         transformerLoad=transformer_series,
     )
 
@@ -511,6 +529,9 @@ class AppState:
                     started_at=self._active_profile_started_at,
                     now=timestamp,
                 )
+                base_settings = base_settings.model_copy(
+                    update={"scenarioSpeedMultiplier": self._simulator_settings.scenarioSpeedMultiplier}
+                )
 
             next_controls, next_settings, still_active = apply_timed_events(
                 controls=base_controls,
@@ -518,6 +539,20 @@ class AppState:
                 active_events=self._active_timed_events,
                 now=timestamp,
             )
+
+            if self._active_scenario_id and self._active_scenario_id != "custom":
+                overlay_progress = get_scenario_progress(
+                    scenario_id=self._active_scenario_id,
+                    started_at=self._active_scenario_started_at,
+                    now=timestamp,
+                    speed_multiplier=next_settings.scenarioSpeedMultiplier,
+                )
+                next_controls, next_settings, _scenario = apply_scenario_overlay(
+                    scenario_id=self._active_scenario_id,
+                    baseline_controls=next_controls,
+                    baseline_settings=next_settings,
+                    progress=overlay_progress,
+                )
 
             expired_event_ids = {
                 event.id for event in self._active_timed_events
@@ -626,34 +661,49 @@ class AppState:
                         reasons.append("Closing blocked: breaker is already closed.")
                     if request.objectId == "LV-BRK" and self._station_breakers["BRK-IN"] != BreakerStatus.CLOSED:
                         reasons.append("Closing blocked: BRK-IN must be closed before LV-BRK can be energized.")
-                    if any(
-                        alarm.severity == "critical" and alarm.state != AlarmState.ACKNOWLEDGED
-                        for alarm in self._active_alarms
-                    ):
-                        reasons.append("Closing blocked: an unacknowledged critical alarm is active downstream.")
+                    would_energize_bus = request.objectId == "LV-BRK" or (
+                        request.objectId == "BRK-IN"
+                        and self._station_breakers["LV-BRK"] == BreakerStatus.CLOSED
+                    )
+                    if would_energize_bus:
+                        closed_downstream_ids = {
+                            control.id
+                            for control in self._controls.values()
+                            if control.breakerStatus == BreakerStatus.CLOSED
+                        }
+                        if any(
+                            alarm.severity == "critical"
+                            and alarm.state != AlarmState.ACKNOWLEDGED
+                            and (alarm.objectId == "T1" or alarm.objectId in closed_downstream_ids)
+                            for alarm in self._active_alarms
+                        ):
+                            reasons.append(
+                                "Closing blocked: acknowledge critical transformer or downstream alarms before bus restore."
+                            )
 
-                    degraded_downstream = [
-                        control.id
-                        for control in self._controls.values()
-                        if control.breakerStatus == BreakerStatus.CLOSED
-                        and control.communicationState in {DataQuality.STALE, DataQuality.INVALID, DataQuality.LOST}
-                    ]
-                    if degraded_downstream:
-                        reasons.append(
-                            "Closing blocked: telemetry is degraded on downstream energized feeders "
-                            f"({', '.join(degraded_downstream)})."
-                        )
+                        degraded_downstream = [
+                            control.id
+                            for control in self._controls.values()
+                            if control.breakerStatus == BreakerStatus.CLOSED
+                            and control.communicationState in {DataQuality.STALE, DataQuality.INVALID, DataQuality.LOST}
+                        ]
+                        if degraded_downstream:
+                            reasons.append(
+                                "Closing blocked: telemetry is degraded on downstream closed feeders "
+                                f"({', '.join(degraded_downstream)})."
+                            )
 
-                    unsafe_downstream = [
-                        control.id
-                        for control in self._controls.values()
-                        if control.faultMode in {FaultMode.OVERLOAD, FaultMode.FORCED_TRIP, FaultMode.SENSOR_FAULT}
-                    ]
-                    if unsafe_downstream:
-                        reasons.append(
-                            "Closing blocked: downstream feeders still carry active fault conditions "
-                            f"({', '.join(unsafe_downstream)})."
-                        )
+                        unsafe_downstream = [
+                            control.id
+                            for control in self._controls.values()
+                            if control.breakerStatus == BreakerStatus.CLOSED
+                            and control.faultMode in {FaultMode.OVERLOAD, FaultMode.FORCED_TRIP, FaultMode.SENSOR_FAULT}
+                        ]
+                        if unsafe_downstream:
+                            reasons.append(
+                                "Closing blocked: downstream closed feeders still carry active fault conditions "
+                                f"({', '.join(unsafe_downstream)})."
+                            )
 
                 allowed = not reasons
                 next_status = (
@@ -777,45 +827,40 @@ class AppState:
     async def update_simulator_settings(self, patch: SimulatorSettingsPatch) -> SimulatorSettings:
         updates = patch.model_dump(exclude_none=True)
         async with self._lock:
-            if self._active_profile_id != "custom":
+            speed_only_update = set(updates.keys()) == {"scenarioSpeedMultiplier"}
+            if not speed_only_update and self._active_profile_id != "custom":
                 self._seed_custom_baseline_from_live_state_unlocked()
-            self._custom_base_settings = self._simulator_settings.model_copy(update=updates)
-            self._simulator_settings = self._custom_base_settings
-            self._active_profile_id = "custom"
-            self._active_profile_started_at = _now_iso()
-            self._active_timed_events = []
-            self._active_scenario_id = "custom"
-            self._active_scenario_started_at = _now_iso()
+
+            if speed_only_update:
+                self._simulator_settings = self._simulator_settings.model_copy(update=updates)
+                self._custom_base_settings = self._custom_base_settings.model_copy(update=updates)
+            else:
+                self._custom_base_settings = self._simulator_settings.model_copy(update=updates)
+                self._simulator_settings = self._custom_base_settings
+                self._active_profile_id = "custom"
+                self._active_profile_started_at = _now_iso()
+                self._active_timed_events = []
+                self._active_scenario_id = "custom"
+                self._active_scenario_started_at = _now_iso()
+
             self._events.appendleft(
                 Event(
                     id=f"evt-{uuid4().hex[:10]}",
                     timestamp=_now_iso(),
                     type="simulator_update",
                     source="simulator",
-                    description="Updated simulator settings.",
+                    description=(
+                        "Oppdaterte scenariohastighet."
+                        if speed_only_update
+                        else "Updated simulator settings."
+                    ),
                 )
             )
             return self._simulator_settings
 
     async def apply_scenario(self, scenario_id: str) -> tuple[list[FeederControlInput], SimulatorSettings]:
         async with self._lock:
-            next_controls, next_settings, scenario_summary = apply_scenario_to_baseline(
-                scenario_id=scenario_id,
-                baseline_controls=list(self._controls.values()),
-                baseline_settings=self._simulator_settings,
-            )
-            self._latched_trip_reasons = {}
-            self._station_breakers = {
-                "BRK-IN": BreakerStatus.CLOSED,
-                "LV-BRK": BreakerStatus.CLOSED,
-            }
-            self._custom_base_controls = {control.id: control.model_copy(deep=True) for control in next_controls}
-            self._custom_base_settings = next_settings.model_copy(deep=True)
-            self._controls = {control.id: control for control in next_controls}
-            self._simulator_settings = next_settings
-            self._active_profile_id = "custom"
-            self._active_profile_started_at = _now_iso()
-            self._active_timed_events = []
+            scenario_summary = get_scenario_summary(scenario_id)
             self._active_scenario_id = scenario_summary.id
             self._active_scenario_started_at = _now_iso()
             self._events.appendleft(
@@ -824,7 +869,7 @@ class AppState:
                     timestamp=_now_iso(),
                     type="scenario_start",
                     source=scenario_summary.id,
-                    description=f"Scenario activated: {scenario_summary.name}.",
+                    description=f"Feilscenario aktivert som overlay: {scenario_summary.name}.",
                 )
             )
             return list(self._controls.values()), self._simulator_settings
@@ -900,6 +945,7 @@ class AppState:
         self,
         voltage_window_sec: int | None = None,
         current_window_sec: int | None = None,
+        active_power_window_sec: int | None = None,
         transformer_window_sec: int | None = None,
     ) -> DashboardTrends:
         async with self._lock:
@@ -909,6 +955,7 @@ class AppState:
             history=history,
             voltage_window_sec=voltage_window_sec or default_window_sec,
             current_window_sec=current_window_sec or default_window_sec,
+            active_power_window_sec=active_power_window_sec or default_window_sec,
             transformer_window_sec=transformer_window_sec or default_window_sec,
             max_points=settings.trend_max_points,
         )

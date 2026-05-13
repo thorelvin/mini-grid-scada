@@ -48,6 +48,21 @@ FEEDER_PROFILES = {
         "defaultReactivePowerKvar": -4.0,
         "defaultSolarKw": 58.0,
     },
+    "F5": {
+        "name": "Romstad Kraftverk",
+        "type": "hydro_generation",
+        "ratingA": 180.0,
+        "warningPercent": 90.0,
+        "tripPercent": 110.0,
+        "tripDelaySec": 10.0,
+        "customers": 0,
+        "criticalCustomers": 0,
+        "nominalHomesSupplied": 50,
+        "householdEquivalentKw": 1.56,
+        "defaultLoadKw": 18.0,
+        "defaultReactivePowerKvar": -6.0,
+        "defaultSolarKw": 96.0,
+    },
 }
 
 DEFAULT_SCENARIOS = [

@@ -62,6 +62,7 @@ export interface FeederControlInput {
 
 export interface SimulatorSettings {
   ambientTempC: number;
+  scenarioSpeedMultiplier: number;
 }
 
 export interface ScenarioSummary {
@@ -105,6 +106,8 @@ export interface FeederTelemetry {
   reactivePowerKvar: number;
   customers: number;
   criticalCustomers: number;
+  generationEquivalentHomes?: number | null;
+  nominalGenerationEquivalentHomes?: number | null;
   quality: DataQuality;
   protection: ProtectionSettings;
   derived: DerivedMetrics;
@@ -151,6 +154,9 @@ export interface Alarm {
   measuredValue?: number | null;
   threshold?: number | null;
   unit?: string | null;
+  probableCause?: string | null;
+  consequence?: string | null;
+  recommendedAction?: string | null;
 }
 
 export interface BreakerCommandRequest {
@@ -211,6 +217,7 @@ export interface DashboardTrends {
   voltageL2: TrendSeries[];
   voltageL3: TrendSeries[];
   currentMax: TrendSeries[];
+  activePower: TrendSeries[];
   transformerLoad: TrendSeries[];
 }
 

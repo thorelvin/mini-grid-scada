@@ -25,6 +25,14 @@ interface TimelineMarker {
   index: number;
 }
 
+interface ReplayBookmark {
+  id: string;
+  label: string;
+  detail: string;
+  marker: TimelineMarker;
+  tone: "good" | "warn" | "critical" | "neutral";
+}
+
 type ReplayFilter = "all" | "alarms" | "commands" | "switching" | "scenarios";
 
 function clampIndex(index: number, size: number): number {
@@ -44,7 +52,7 @@ function buildTimelineMarkers(history: DashboardPayload[]): TimelineMarker[] {
 
   return [...markersById.values()]
     .sort((left, right) => new Date(left.event.timestamp).getTime() - new Date(right.event.timestamp).getTime())
-    .slice(-24);
+    .slice(-40);
 }
 
 function getMarkerFilterLabel(filter: ReplayFilter): string {
@@ -101,6 +109,75 @@ function findNearestMarkerIndex(markers: TimelineMarker[], replayIndex: number):
   return bestMarkerIndex;
 }
 
+function buildReplayBookmarks(markers: TimelineMarker[]): ReplayBookmark[] {
+  const firstAlarm = markers.find((marker) => marker.event.type === "alarm_raised");
+  const firstTrip = markers.find(
+    (marker) =>
+      marker.event.type === "breaker_state" &&
+      /tripped|trip/i.test(marker.event.description),
+  );
+  const firstBlocked = markers.find((marker) => marker.event.type === "command_blocked");
+  const latestRestore = [...markers].reverse().find(
+    (marker) =>
+      marker.event.type === "command_executed" &&
+      /close_breaker/i.test(marker.event.description),
+  );
+  const latestScenario = [...markers].reverse().find(
+    (marker) =>
+      marker.event.type === "scenario_start" ||
+      marker.event.type === "timed_event_start" ||
+      marker.event.type === "timed_event_end",
+  );
+
+  return [
+    firstAlarm
+      ? {
+          id: `bookmark-${firstAlarm.event.id}`,
+          label: "Forste alarm",
+          detail: `${firstAlarm.event.source} ${getEventTypeLabel(firstAlarm.event.type)}`,
+          marker: firstAlarm,
+          tone: "warn",
+        }
+      : null,
+    firstTrip
+      ? {
+          id: `bookmark-${firstTrip.event.id}`,
+          label: "Forste trip",
+          detail: `${firstTrip.event.source} bryterhendelse`,
+          marker: firstTrip,
+          tone: "critical",
+        }
+      : null,
+    firstBlocked
+      ? {
+          id: `bookmark-${firstBlocked.event.id}`,
+          label: "Blokkert kommando",
+          detail: `${firstBlocked.event.source} krevde interlock`,
+          marker: firstBlocked,
+          tone: "warn",
+        }
+      : null,
+    latestRestore
+      ? {
+          id: `bookmark-${latestRestore.event.id}`,
+          label: "Siste restore",
+          detail: `${latestRestore.event.source} ble lukket`,
+          marker: latestRestore,
+          tone: "good",
+        }
+      : null,
+    latestScenario
+      ? {
+          id: `bookmark-${latestScenario.event.id}`,
+          label: "Siste scenario",
+          detail: latestScenario.event.source,
+          marker: latestScenario,
+          tone: "neutral",
+        }
+      : null,
+  ].filter((bookmark): bookmark is ReplayBookmark => Boolean(bookmark));
+}
+
 export function ReplayTimeline({
   history,
   replayIndex,
@@ -124,6 +201,7 @@ export function ReplayTimeline({
   const historyEnd = history[history.length - 1]?.snapshot.timestamp ?? null;
   const markers = buildTimelineMarkers(history);
   const filteredMarkers = markers.filter((marker) => markerMatchesFilter(marker, activeFilter));
+  const bookmarks = buildReplayBookmarks(markers);
   const nearestFilteredMarkerIndex = findNearestMarkerIndex(filteredMarkers, clampedIndex);
   const currentMarker =
     nearestFilteredMarkerIndex != null ? filteredMarkers[nearestFilteredMarkerIndex] : null;
@@ -180,6 +258,25 @@ export function ReplayTimeline({
         </div>
       </div>
 
+      {bookmarks.length > 0 ? (
+        <div className="replay-bookmark-strip">
+          {bookmarks.map((bookmark) => (
+            <button
+              key={bookmark.id}
+              type="button"
+              className={`replay-bookmark-card tone-${bookmark.tone} ${
+                bookmark.marker.index === currentMarker?.index ? "selected" : ""
+              }`}
+              onClick={() => onSelectIndex(bookmark.marker.index)}
+            >
+              <span>{bookmark.label}</span>
+              <strong>{formatTime(bookmark.marker.event.timestamp)}</strong>
+              <p>{bookmark.detail}</p>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       <div className="replay-filter-row">
         {(["all", "alarms", "commands", "switching", "scenarios"] as ReplayFilter[]).map((filter) => (
           <button
@@ -213,7 +310,7 @@ export function ReplayTimeline({
 
       <div className="replay-controls">
         <button type="button" className="secondary-button" onClick={() => onSelectIndex(0)} disabled={clampedIndex === 0}>
-          Først
+          Forst
         </button>
         <button type="button" className="secondary-button" onClick={() => onStep(-1)} disabled={clampedIndex === 0}>
           Tilbake

@@ -24,17 +24,17 @@ type SymbolTone = "good" | "neutral" | "critical" | "high" | "medium" | "warn" |
 type RouteState = "energized" | "open" | "tripped";
 type DiagramBox = { x: number; y: number; width: number; height: number };
 
-const VIEWBOX_WIDTH = 1160;
-const VIEWBOX_HEIGHT = 1068;
+const VIEWBOX_WIDTH = 1340;
+const VIEWBOX_HEIGHT = 1110;
 const CARD_RADIUS = 24;
-const INLET_BOX: DiagramBox = { x: 22, y: 128, width: 360, height: 288 };
-const TRANSFORMER_BOX: DiagramBox = { x: 778, y: 128, width: 360, height: 288 };
+const INLET_BOX: DiagramBox = { x: 22, y: 128, width: 376, height: 288 };
+const TRANSFORMER_BOX: DiagramBox = { x: 942, y: 128, width: 376, height: 288 };
 const BUSBAR_Y = 560;
 const FEEDER_BREAKER_Y = 644;
 const FEEDER_BOX_Y = 724;
-const FEEDER_BOX_WIDTH = 250;
-const FEEDER_BOX_HEIGHT = 316;
-const FEEDER_BOX_X = [26, 306, 586, 866];
+const FEEDER_BOX_HEIGHT = 332;
+const FEEDER_GAP = 16;
+const DIAGRAM_SIDE_PADDING = 28;
 
 function getRouteState(status: BreakerStatus): RouteState {
   return status === "closed" ? "energized" : status;
@@ -90,6 +90,11 @@ function truncateText(value: string, maxLength: number): string {
   return `${value.slice(0, maxLength - 3)}...`;
 }
 
+function getWrappedLineCount(value: string, width: number): number {
+  const maxChars = Math.max(10, Math.floor(width / 8.4));
+  return wrapText(value, maxChars).length;
+}
+
 function getToneColor(tone: SymbolTone): string {
   switch (tone) {
     case "critical":
@@ -112,22 +117,22 @@ function getRouteStyle(tone: SymbolTone, state: RouteState, selected: boolean) {
     return {
       color: "#ff6a68",
       opacity: 1,
-      strokeWidth: selected ? 5 : 4,
+      strokeWidth: selected ? 5.4 : 4.2,
     };
   }
 
   if (state === "open") {
     return {
       color: getToneColor(tone),
-      opacity: 0.26,
-      strokeWidth: selected ? 5 : 4,
+      opacity: selected ? 0.34 : 0.18,
+      strokeWidth: selected ? 4.8 : 3.4,
     };
   }
 
   return {
     color: getToneColor(tone),
     opacity: 1,
-    strokeWidth: selected ? 5 : 4,
+    strokeWidth: selected ? 5.6 : 4.4,
   };
 }
 
@@ -164,7 +169,7 @@ function renderRouteSegment({
 }) {
   const style = getRouteStyle(tone, state, selected);
   const dashArray = getRouteDashArray(state);
-  const glowOpacity = state === "open" ? 0 : state === "tripped" ? 0.18 : 0.24;
+  const glowOpacity = state === "open" ? 0 : state === "tripped" ? 0.18 : selected ? 0.34 : 0.28;
 
   return (
     <g className={`diagram-route-segment state-${state} ${selected ? "selected" : ""}`}>
@@ -641,6 +646,8 @@ export function SingleLineDiagram({
     supplyRouteState === "energized" ? getTransformerRouteState(snapshot) : supplyRouteState;
   const busRouteState =
     transformerRouteState === "energized" ? getRouteState(lvBreakerStatus) : transformerRouteState;
+  const busStateTone: SymbolTone =
+    busRouteState === "energized" ? supplyTone : busRouteState === "tripped" ? "critical" : "neutral";
   const hasSelectedFeeder = displayFeeders.some((feeder) => feeder.id === selectedAssetId);
   const inletSelected = selectedAssetId === "BRK-IN";
   const transformerSelected = selectedAssetId === "T1";
@@ -650,10 +657,26 @@ export function SingleLineDiagram({
   const selectsTransformerPath = transformerSelected || lvBreakerSelected || hasSelectedFeeder;
   const selectsBusPath = lvBreakerSelected || hasSelectedFeeder;
   const busEnergized = busRouteState === "energized";
-  const feederCenters = FEEDER_BOX_X.map((x) => x + FEEDER_BOX_WIDTH / 2);
+  const feederCount = Math.max(displayFeeders.length, 1);
+  const feederBoxWidth = Math.min(
+    250,
+    Math.max(
+      198,
+      Math.floor(
+        (VIEWBOX_WIDTH - DIAGRAM_SIDE_PADDING * 2 - FEEDER_GAP * (feederCount - 1)) / feederCount,
+      ),
+    ),
+  );
+  const feederRowWidth = feederCount * feederBoxWidth + FEEDER_GAP * (feederCount - 1);
+  const feederRowStartX = Math.round((VIEWBOX_WIDTH - feederRowWidth) / 2);
+  const feederBoxX = Array.from(
+    { length: feederCount },
+    (_, index) => feederRowStartX + index * (feederBoxWidth + FEEDER_GAP),
+  );
+  const feederCenters = feederBoxX.map((x) => x + feederBoxWidth / 2);
   const transformerCenterX = TRANSFORMER_BOX.x + TRANSFORMER_BOX.width / 2;
   const supplyLineY = INLET_BOX.y + 120;
-  const supplyBreakerX = 580;
+  const supplyBreakerX = Math.round((INLET_BOX.x + INLET_BOX.width + TRANSFORMER_BOX.x) / 2);
   const transformerFeedBreakerY = 474;
 
   return (
@@ -817,13 +840,17 @@ export function SingleLineDiagram({
             )}
             {renderRouteNode(transformerCenterX, BUSBAR_Y, supplyTone, transformerRouteState, selectsBusPath)}
 
-            <text className="diagram-svg-annotation-large" x={28} y={BUSBAR_Y - 18}>
+            <text className="diagram-svg-annotation-large" x={DIAGRAM_SIDE_PADDING} y={BUSBAR_Y - 18}>
               0.4 kV samleskinne
             </text>
+            <text className="diagram-svg-annotation" x={VIEWBOX_WIDTH - 120} y={BUSBAR_Y - 44} textAnchor="middle">
+              BUS-01
+            </text>
+            {renderPill(getRouteStateLabel(busRouteState), busStateTone, VIEWBOX_WIDTH - 194, BUSBAR_Y - 28, 136)}
             {renderRouteSegment({
-              x1: 28,
+              x1: DIAGRAM_SIDE_PADDING,
               y1: BUSBAR_Y,
-              x2: 1132,
+              x2: VIEWBOX_WIDTH - DIAGRAM_SIDE_PADDING,
               y2: BUSBAR_Y,
               tone: supplyTone,
               state: busRouteState,
@@ -831,9 +858,9 @@ export function SingleLineDiagram({
               accentWidth: 1,
             })}
             {renderRouteSegment({
-              x1: 28,
+              x1: DIAGRAM_SIDE_PADDING,
               y1: BUSBAR_Y + 8,
-              x2: 1132,
+              x2: VIEWBOX_WIDTH - DIAGRAM_SIDE_PADDING,
               y2: BUSBAR_Y + 8,
               tone: supplyTone,
               state: busRouteState,
@@ -951,9 +978,9 @@ export function SingleLineDiagram({
             const tone = getFeederStateTone(feeder, feederAlarm) as SymbolTone;
             const stateLabel = getFeederStateLabel(feeder, feederAlarm);
             const box: DiagramBox = {
-              x: FEEDER_BOX_X[index],
+              x: feederBoxX[index],
               y: FEEDER_BOX_Y,
-              width: FEEDER_BOX_WIDTH,
+              width: feederBoxWidth,
               height: FEEDER_BOX_HEIGHT,
             };
             const title = showNames ? `${feeder.id} - ${feeder.name}` : feeder.id;
@@ -962,8 +989,16 @@ export function SingleLineDiagram({
               : `${formatSignedValue(feeder.activePowerKw)} kW | ${formatValue(feeder.derived.utilizationPercent, 0)} %`;
             const footerText = feederAlarm ? feederAlarm.title : "Normal drift";
             const isDimmed = selectedFeederId !== null && selectedFeederId !== feeder.id;
-            const metricStartY = box.y + 144;
             const powerState = busEnergized ? getRouteState(feeder.breakerStatus) : "open";
+            const customerMetricLabel =
+              feeder.customers === 0 && (feeder.nominalGenerationEquivalentHomes ?? 0) > 0 ? "Boliger" : "Kunder";
+            const customerMetricValue =
+              feeder.customers === 0 && (feeder.nominalGenerationEquivalentHomes ?? 0) > 0
+                ? formatValue(feeder.generationEquivalentHomes ?? 0)
+                : formatValue(feeder.customers);
+            const titleWidth = Math.max(148, box.width - 36);
+            const titleLineCount = getWrappedLineCount(title, titleWidth);
+            const metricStartY = box.y + 124 + titleLineCount * 24;
 
             return (
               <g
@@ -979,7 +1014,8 @@ export function SingleLineDiagram({
                     selected: selectedAssetId === feeder.id,
                     onClick: () => onSelect(feeder.id),
                     powerState,
-                    titleWidth: 112,
+                    titleInsetY: 72,
+                    titleWidth,
                   },
                   showValues ? (
                     <>
@@ -991,7 +1027,7 @@ export function SingleLineDiagram({
                       {renderInlineMetric("UL1", `${formatValue(feeder.voltage.l1, 0)} V`, box.x + 132, metricStartY + 64)}
                       {renderInlineMetric("UL2", `${formatValue(feeder.voltage.l2, 0)} V`, box.x + 18, metricStartY + 96)}
                       {renderInlineMetric("UL3", `${formatValue(feeder.voltage.l3, 0)} V`, box.x + 132, metricStartY + 96)}
-                      {renderInlineMetric("Kunder", formatValue(feeder.customers), box.x + 18, metricStartY + 128)}
+                      {renderInlineMetric(customerMetricLabel, customerMetricValue, box.x + 18, metricStartY + 128)}
                     </>
                   ) : (
                     <>
@@ -1005,10 +1041,10 @@ export function SingleLineDiagram({
                       powerState === "energized" ? "good" : powerState === "tripped" ? "critical" : "neutral",
                       box.x + 18,
                       box.y + 18,
-                      118,
+                      92,
                     )}
-                    {renderPill(stateLabel, tone, box.x + box.width - 94, box.y + 18, 78)}
-                    <text className={`diagram-svg-footer tone-${tone}`} x={box.x + 18} y={box.y + box.height - 30}>
+                    {renderPill(stateLabel, tone, box.x + box.width - 82, box.y + 18, 64)}
+                    <text className={`diagram-svg-footer tone-${tone}`} x={box.x + 18} y={box.y + box.height - 24}>
                       {truncateText(footerText, 30)}
                     </text>
                   </>,

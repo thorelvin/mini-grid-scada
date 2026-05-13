@@ -11,6 +11,7 @@ import type {
 } from "../types";
 
 type SimulatorTab = "load" | "faults" | "patterns";
+const SCENARIO_SPEED_OPTIONS = [0.5, 1, 2, 3, 4] as const;
 
 interface SimulatorPanelProps {
   controls: FeederControlInput[];
@@ -89,6 +90,16 @@ function getFaultScenarioDisplayName(activeScenarioId: string | null | undefined
   return scenarios.find((scenario) => scenario.id === activeScenarioId)?.name ?? activeScenarioId;
 }
 
+function getGenerationLabel(feederId: string): string {
+  if (feederId === "F4") {
+    return "Solproduksjon F4 (kW)";
+  }
+  if (feederId === "F5") {
+    return "Vannkraft F5 (kW)";
+  }
+  return "Lokal produksjon (kW)";
+}
+
 export function SimulatorPanel({
   controls,
   simulatorSettings,
@@ -111,6 +122,9 @@ export function SimulatorPanel({
   const [activeTab, setActiveTab] = useState<SimulatorTab>("load");
   const [drafts, setDrafts] = useState<Record<string, FeederControlInput>>({});
   const [ambientTempC, setAmbientTempC] = useState<number>(simulatorSettings?.ambientTempC ?? 18);
+  const [scenarioSpeedMultiplier, setScenarioSpeedMultiplier] = useState<number>(
+    simulatorSettings?.scenarioSpeedMultiplier ?? 1,
+  );
 
   useEffect(() => {
     const nextDrafts = Object.fromEntries(controls.map((control) => [control.id, control]));
@@ -120,6 +134,7 @@ export function SimulatorPanel({
   useEffect(() => {
     if (simulatorSettings) {
       setAmbientTempC(simulatorSettings.ambientTempC);
+      setScenarioSpeedMultiplier(simulatorSettings.scenarioSpeedMultiplier);
     }
   }, [simulatorSettings]);
 
@@ -170,6 +185,11 @@ export function SimulatorPanel({
           <strong>{faultDisplayName}</strong>
           <p>{activeScenarioStartedAt ? `Siden ${formatElapsed(activeScenarioStartedAt)}` : "Ingen fault overlay"}</p>
         </div>
+        <div className="simulator-summary-card">
+          <span>Scenariofart</span>
+          <strong>{Math.round(scenarioSpeedMultiplier * 100)}%</strong>
+          <p>Bestemmer hvor raskt feiloverlay bygger seg opp.</p>
+        </div>
       </div>
 
       {activeTimedEvents.length ? (
@@ -212,7 +232,7 @@ export function SimulatorPanel({
                 <input
                   type="range"
                   min="0"
-                  max={control.id === "F4" ? "180" : "320"}
+                  max={control.id === "F4" ? "180" : control.id === "F5" ? "160" : "320"}
                   step="1"
                   value={draft.loadKw}
                   onChange={(event) =>
@@ -223,10 +243,10 @@ export function SimulatorPanel({
                   }
                 />
 
-                {control.id === "F4" ? (
+                {control.id === "F4" || control.id === "F5" ? (
                   <>
                     <div className="slider-header">
-                      <strong>Solproduksjon F4 (kW)</strong>
+                      <strong>{getGenerationLabel(control.id)}</strong>
                       <input
                         type="number"
                         value={draft.solarKw}
@@ -241,7 +261,7 @@ export function SimulatorPanel({
                     <input
                       type="range"
                       min="0"
-                      max="180"
+                      max={control.id === "F4" ? "180" : "160"}
                       step="1"
                       value={draft.solarKw}
                       onChange={(event) =>
@@ -316,7 +336,31 @@ export function SimulatorPanel({
         <div className="simulator-stack">
           <section className="subpanel">
             <h3>Feilscenarier</h3>
-            <p className="muted">Bruk fault overlays for å trigge alarmer, interlocks og operative konsekvenser.</p>
+            <p className="muted">Feilscenarier legges oppa aktiv profil og bygger seg gradvis opp fra naavaerende verdier.</p>
+            <div className="scenario-speed-panel">
+              <div className="scenario-speed-copy">
+                <strong>Hastighet</strong>
+                <p>Bruk 50% for rolig oppbygging eller 400% for rask feileffekt.</p>
+              </div>
+              <div className="scenario-speed-buttons" role="group" aria-label="Scenariohastighet">
+                {SCENARIO_SPEED_OPTIONS.map((option) => {
+                  const active = Math.abs(scenarioSpeedMultiplier - option) < 0.001;
+                  return (
+                    <button
+                      key={option}
+                      type="button"
+                      className={`trend-phase-button scenario-speed-button ${active ? "active" : ""}`}
+                      onClick={() => {
+                        setScenarioSpeedMultiplier(option);
+                        void onApplySettings({ scenarioSpeedMultiplier: option });
+                      }}
+                    >
+                      {Math.round(option * 100)}%
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
             <div className="scenario-grid">
               {scenarios.map((scenario) => (
                 <SimulatorCard

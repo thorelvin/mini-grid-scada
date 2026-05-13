@@ -25,6 +25,7 @@ export const seriesPalette: Record<string, string> = {
   F2: "#b28dff",
   F3: "#ff8d36",
   F4: "#82d95b",
+  F5: "#5ad0ff",
   T1: "#f3f4f6",
 };
 
@@ -196,6 +197,23 @@ export function getFaultModeLabel(mode: FaultMode): string {
       return "Tvungen trip";
     default:
       return String(mode);
+  }
+}
+
+export function getFeederTypeLabel(type: string): string {
+  switch (type) {
+    case "housing":
+      return "Bolig";
+    case "industry":
+      return "Naering";
+    case "ev_charging":
+      return "Elbillading";
+    case "solar_prosumer":
+      return "Sol og prosument";
+    case "hydro_generation":
+      return "Vannkraft";
+    default:
+      return type.replace(/_/g, " ");
   }
 }
 

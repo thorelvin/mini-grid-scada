@@ -5,6 +5,7 @@ import {
   formatValue,
   formatVoltageRangeLabel,
   getBreakerStatusLabel,
+  getFeederTypeLabel,
   getFaultModeLabel,
   getObjectAlarms,
   getPowerFactor,
@@ -15,6 +16,7 @@ import {
 import {
   getBreakerOutcomeLabel,
   getFeederCommandPreviews,
+  getStationBreakerRestoreAssessment,
   getTopologyImpactSummary,
 } from "../topology-utils";
 import type {
@@ -93,6 +95,16 @@ function buildStationBreakerViewModel(
   };
 }
 
+function isGenerationSupportFeeder(feeder: FeederTelemetry): boolean {
+  return feeder.customers === 0 && (feeder.nominalGenerationEquivalentHomes ?? 0) > 0;
+}
+
+function getGenerationSupportLabel(feeder: FeederTelemetry): string {
+  const currentHomes = feeder.generationEquivalentHomes ?? 0;
+  const nominalHomes = feeder.nominalGenerationEquivalentHomes ?? currentHomes;
+  return `${formatValue(currentHomes)} av ca. ${formatValue(nominalHomes)} boliger`;
+}
+
 function TabButton({
   active,
   label,
@@ -144,6 +156,7 @@ function StationBreakerPanel({
   snapshot,
   topology,
   alarms,
+  controls,
   selectedAssetId,
   lastCommandResult,
   busy,
@@ -156,6 +169,7 @@ function StationBreakerPanel({
   snapshot: StationSnapshot;
   topology: StationTopology | null;
   alarms: Alarm[];
+  controls: FeederControlInput[];
   selectedAssetId: StationBreakerId;
   lastCommandResult?: CommandResult | null;
   busy: boolean;
@@ -167,6 +181,13 @@ function StationBreakerPanel({
 }) {
   const breaker = buildStationBreakerViewModel(snapshot, selectedAssetId);
   const impactSummary = getTopologyImpactSummary(topology, snapshot, selectedAssetId);
+  const restoreAssessment = getStationBreakerRestoreAssessment(
+    topology,
+    snapshot,
+    alarms,
+    controls,
+    selectedAssetId,
+  );
   const affectedFeeders = impactSummary?.downstreamFeederIds.join(", ") || "Ingen nedstrøms grener";
   const [operator, setOperator] = useState("Operatør");
   const [reason, setReason] = useState("Stasjonskobling");
@@ -238,6 +259,14 @@ function StationBreakerPanel({
               value={formatValue(impactSummary?.downstreamFeederIds.length ?? 0)}
             />
             <MetricRow label="Målt sekundærspenning" value={`${formatValue(breaker.measuredVoltageV, 0)} V`} />
+            <MetricRow
+              label="Restore-status"
+              value={restoreAssessment.readyToClose ? "Klar for lukking" : "Sperret"}
+            />
+            <MetricRow
+              label="Ved lukking"
+              value={restoreAssessment.wouldEnergizeBus ? "Trafo + samleskinne" : "Kun trafo"}
+            />
             <MetricRow label="Siste oppdatering" value={formatTime(snapshot.timestamp)} />
           </>
         ) : null}
@@ -265,19 +294,15 @@ function StationBreakerPanel({
               </div>
             ) : null}
             <div className="command-preview-grid">
-              <div className="command-preview-card tone-warn">
-                <span>Ved utkobling</span>
-                <strong>{formatValue(impactSummary?.totalCustomers ?? 0)} kunder kan bli berørt</strong>
-                <p>
-                  Hele den nedstrøms forsyningsveien må vurderes før stasjonskobling gjøres tilgjengelig.
-                </p>
+              <div className={`command-preview-card tone-${restoreAssessment.openImpact.tone}`}>
+                <span>{restoreAssessment.openImpact.title}</span>
+                <strong>{restoreAssessment.openImpact.headline}</strong>
+                <p>{restoreAssessment.openImpact.detail}</p>
               </div>
-              <div className="command-preview-card tone-neutral">
-                <span>Ved innkobling</span>
-                <strong>Konservativ gjeninnkobling</strong>
-                <p>
-                  Lukking vurderes mot oppstrøms mating, downstream alarmer, datakvalitet og fault-latcher før kommandoen slipper gjennom.
-                </p>
+              <div className={`command-preview-card tone-${restoreAssessment.closeImpact.tone}`}>
+                <span>{restoreAssessment.closeImpact.title}</span>
+                <strong>{restoreAssessment.closeImpact.headline}</strong>
+                <p>{restoreAssessment.closeImpact.detail}</p>
               </div>
             </div>
           </>
@@ -312,6 +337,38 @@ function StationBreakerPanel({
             <p className="impact-note">
               Nedstrøms grener: {affectedFeeders}. Stasjonsbryteren er nå fullt modellert i topologien og bruker samme audit-logg som feederkommandoer.
             </p>
+          </div>
+
+          <div className="subpanel">
+            <h3>Restore-status</h3>
+            <div className="restore-status-head">
+              <span className={`state-pill tone-${restoreAssessment.readyToClose ? "good" : "warn"}`}>
+                {restoreAssessment.readyToClose ? "Klar for kontrollert lukking" : "Krever opprydding"}
+              </span>
+            </div>
+            {restoreAssessment.blockingReasons.length ? (
+              <div className="reason-list">
+                {restoreAssessment.blockingReasons.map((reasonItem) => (
+                  <p key={reasonItem}>{reasonItem}</p>
+                ))}
+              </div>
+            ) : (
+              <p className="good-text">Ingen aktive sperrer for neste restore-steg.</p>
+            )}
+            {restoreAssessment.advisoryNotes.length ? (
+              <div className="restore-advisory-list">
+                {restoreAssessment.advisoryNotes.map((note) => (
+                  <p key={note}>{note}</p>
+                ))}
+              </div>
+            ) : null}
+            <div className="restore-step-list">
+              {restoreAssessment.restoreSteps.map((step, index) => (
+                <p key={step}>
+                  <strong>{index + 1}.</strong> {step}
+                </p>
+              ))}
+            </div>
           </div>
         </>
       ) : null}
@@ -503,6 +560,7 @@ export function SelectedObjectPanel({
         snapshot={snapshot}
         topology={topology}
         alarms={alarms}
+        controls={controls}
         selectedAssetId={resolvedAssetId}
         lastCommandResult={lastCommandResult}
         busy={busy}
@@ -520,6 +578,8 @@ export function SelectedObjectPanel({
     return null;
   }
   const selectedFeeder = feeder;
+  const generationSupportFeeder = isGenerationSupportFeeder(selectedFeeder);
+  const supportHomesLabel = generationSupportFeeder ? getGenerationSupportLabel(selectedFeeder) : null;
 
   const relatedAlarms = sortAlarms(getObjectAlarms(alarms, selectedFeeder.id));
   const relatedCommand = lastCommandResult?.objectId === selectedFeeder.id ? lastCommandResult : null;
@@ -551,7 +611,9 @@ export function SelectedObjectPanel({
 
   async function handleOpenBreaker() {
     const confirmed = window.confirm(
-      `Åpne ${selectedFeeder.id}? Dette kobler ut ${selectedFeeder.customers} kunder, inkludert ${selectedFeeder.criticalCustomers} kritiske kunder.`,
+      generationSupportFeeder
+        ? `Åpne ${selectedFeeder.id}? Dette kobler ut lokal produksjon tilsvarende ca. ${selectedFeeder.generationEquivalentHomes ?? 0} boliger.`
+        : `Åpne ${selectedFeeder.id}? Dette kobler ut ${selectedFeeder.customers} kunder, inkludert ${selectedFeeder.criticalCustomers} kritiske kunder.`,
     );
     if (!confirmed) {
       return;
@@ -614,8 +676,17 @@ export function SelectedObjectPanel({
             />
             <MetricRow label="Spenning min/max" value={formatVoltageRangeLabel(feeder.voltage, 0)} />
             <MetricRow label="Faseubalanse" value={`${formatValue(feeder.derived.phaseImbalancePercent, 1)} %`} />
-            <MetricRow label="Kunder tilknyttet" value={formatValue(feeder.customers)} />
-            <MetricRow label="Kritiske kunder" value={formatValue(feeder.criticalCustomers)} />
+            {generationSupportFeeder ? (
+              <>
+                <MetricRow label="Kan forsyne ca." value={supportHomesLabel ?? "--"} />
+                <MetricRow label="Direkte kunder" value="0" />
+              </>
+            ) : (
+              <>
+                <MetricRow label="Kunder tilknyttet" value={formatValue(feeder.customers)} />
+                <MetricRow label="Kritiske kunder" value={formatValue(feeder.criticalCustomers)} />
+              </>
+            )}
             <MetricRow label="Siste endring" value={formatTime(feeder.timestamp)} />
             <MetricRow label="Siste hendelse" value={relatedAlarms[0] ? relatedAlarms[0].title : "Ingen aktive alarmer"} />
           </>
@@ -649,7 +720,9 @@ export function SelectedObjectPanel({
             <div className="impact-card">
               <strong>Konsekvens</strong>
               <p>
-                {feeder.customers} kunder på feeder, {feeder.criticalCustomers} kritiske kunder.
+                {generationSupportFeeder
+                  ? `Lokal produksjon tilsvarende ${supportHomesLabel ?? "ca. 0 boliger"} er tilgjengelig på denne grenen.`
+                  : `${feeder.customers} kunder på feeder, ${feeder.criticalCustomers} kritiske kunder.`}
               </p>
             </div>
             {feeder.breakerStatus === "tripped" ? (
@@ -692,8 +765,11 @@ export function SelectedObjectPanel({
         {activeTab === "info" ? (
           <>
             <MetricRow label="Datakvalitet" value={getQualityLabel(feeder.quality)} />
-            <MetricRow label="Feeder-type" value={feeder.type} />
+            <MetricRow label="Feeder-type" value={getFeederTypeLabel(feeder.type)} />
             <MetricRow label="Effektretning" value={feeder.derived.powerDirection} />
+            {generationSupportFeeder ? (
+              <MetricRow label="Dimensjonert for" value={`ca. ${formatValue(feeder.nominalGenerationEquivalentHomes ?? 0)} boliger`} />
+            ) : null}
             <MetricRow label="Feilmodus" value={control ? getFaultModeLabel(control.faultMode) : "Normal"} />
             <MetricRow label="Tripgrense" value={`${formatValue(feeder.protection.tripPercent, 0)} %`} />
             <MetricRow label="Varselgrense" value={`${formatValue(feeder.protection.warningPercent, 0)} %`} />
@@ -712,14 +788,22 @@ export function SelectedObjectPanel({
           <div className="subpanel">
             <h3>Nettkonsekvens</h3>
             <div className="impact-grid">
-              <ImpactStat label="Kunder på gren" value={formatValue(impactSummary.totalCustomers)} accent />
-              <ImpactStat label="Kritiske kunder" value={formatValue(impactSummary.criticalCustomers)} />
+              <ImpactStat
+                label={generationSupportFeeder ? "Produksjonsstøtte" : "Kunder på gren"}
+                value={generationSupportFeeder ? (supportHomesLabel ?? "--") : formatValue(impactSummary.totalCustomers)}
+                accent
+              />
+              <ImpactStat
+                label={generationSupportFeeder ? "Direkte kunder" : "Kritiske kunder"}
+                value={generationSupportFeeder ? "0" : formatValue(impactSummary.criticalCustomers)}
+              />
               <ImpactStat label="Forsyningsstatus" value={getBreakerOutcomeLabel(feeder.breakerStatus)} />
               <ImpactStat label="Kunder ute nå" value={formatValue(impactSummary.disconnectedCustomers)} />
             </div>
             <p className="impact-note">
-              Ved utkobling på denne grenen påvirkes {feeder.id}. Oppstrøms forsyning er{" "}
-              {impactSummary.upstreamSupplyAvailable ? "tilgjengelig" : "ikke tilgjengelig"}.
+              {generationSupportFeeder
+                ? `Ved utkobling på denne grenen faller lokal vannkraftstøtte bort. Oppstrøms forsyning er ${impactSummary.upstreamSupplyAvailable ? "tilgjengelig" : "ikke tilgjengelig"}.`
+                : `Ved utkobling på denne grenen påvirkes ${feeder.id}. Oppstrøms forsyning er ${impactSummary.upstreamSupplyAvailable ? "tilgjengelig" : "ikke tilgjengelig"}.`}
             </p>
           </div>
         </>

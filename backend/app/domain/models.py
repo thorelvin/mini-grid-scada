@@ -85,10 +85,12 @@ class FeederControlPatch(DomainModel):
 
 class SimulatorSettings(DomainModel):
     ambientTempC: float = 18.0
+    scenarioSpeedMultiplier: float = 1.0
 
 
 class SimulatorSettingsPatch(DomainModel):
     ambientTempC: float | None = None
+    scenarioSpeedMultiplier: float | None = None
 
 
 class ScenarioSummary(DomainModel):
@@ -132,6 +134,8 @@ class FeederTelemetry(DomainModel):
     reactivePowerKvar: float
     customers: int
     criticalCustomers: int
+    generationEquivalentHomes: int | None = None
+    nominalGenerationEquivalentHomes: int | None = None
     quality: DataQuality
     protection: ProtectionSettings
     derived: DerivedMetrics
@@ -211,6 +215,7 @@ class DashboardTrends(DomainModel):
     voltageL2: list[TrendSeries]
     voltageL3: list[TrendSeries]
     currentMax: list[TrendSeries]
+    activePower: list[TrendSeries]
     transformerLoad: list[TrendSeries]
 
 

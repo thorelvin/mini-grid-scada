@@ -27,6 +27,7 @@ export function getDashboard(): Promise<DashboardPayload> {
 export function getTrends(params?: {
   voltageWindowSec?: number;
   currentWindowSec?: number;
+  activePowerWindowSec?: number;
   transformerWindowSec?: number;
 }): Promise<DashboardTrends> {
   const searchParams = new URLSearchParams();
@@ -35,6 +36,9 @@ export function getTrends(params?: {
   }
   if (params?.currentWindowSec) {
     searchParams.set("current_window_sec", String(params.currentWindowSec));
+  }
+  if (params?.activePowerWindowSec) {
+    searchParams.set("active_power_window_sec", String(params.activePowerWindowSec));
   }
   if (params?.transformerWindowSec) {
     searchParams.set("transformer_window_sec", String(params.transformerWindowSec));

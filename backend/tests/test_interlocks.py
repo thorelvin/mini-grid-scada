@@ -23,6 +23,26 @@ def _build_state() -> AppState:
 
 
 async def _refresh_state(app_state: AppState) -> None:
+    await app_state.advance_dynamic_state()
+    controls = await app_state.get_controls()
+    station_breakers = await app_state.get_station_breakers()
+    simulator_settings = await app_state.get_simulator_settings()
+    snapshot = build_snapshot(
+        station_id="NST-001",
+        mode="simulation",
+        controls=controls,
+        ambient_temp_c=simulator_settings.ambientTempC,
+        nominal_phase_voltage_v=230.0,
+        nominal_line_voltage_v=400.0,
+        transformer_rating_kva=1250.0,
+        station_breaker_states=station_breakers,
+    )
+    alarms = evaluate_snapshot(snapshot)
+    await app_state.update_frame(snapshot, alarms)
+
+
+async def _refresh_state_at(app_state: AppState, now: str) -> None:
+    await app_state.advance_dynamic_state(now=now)
     controls = await app_state.get_controls()
     station_breakers = await app_state.get_station_breakers()
     simulator_settings = await app_state.get_simulator_settings()
@@ -96,12 +116,48 @@ def test_lv_breaker_open_deenergizes_all_closed_downstream_feeders():
     asyncio.run(run())
 
 
-def test_lv_breaker_close_is_blocked_when_downstream_trip_is_active():
+def test_lv_breaker_close_allows_restore_when_tripped_feeder_is_isolated():
     async def run():
         app_state = _build_state()
         await app_state.update_control("F3", FeederControlPatch(loadKw=320.0))
         await _refresh_state(app_state)
-        await app_state.acknowledge_alarms("F3")
+
+        opened = await app_state.execute_breaker_command(
+            CommandAction.OPEN_BREAKER,
+            BreakerCommandRequest(
+                objectId="LV-BRK",
+                operator="operator",
+                reason="Testing",
+                confirmImpact=True,
+            ),
+        )
+        assert opened.allowed is True
+
+        restored = await app_state.execute_breaker_command(
+            CommandAction.CLOSE_BREAKER,
+            BreakerCommandRequest(objectId="LV-BRK", operator="operator", reason="Restore bus"),
+        )
+
+        assert restored.allowed is True
+
+        await _refresh_state(app_state)
+        snapshot = await app_state.get_snapshot()
+        feeders = {feeder.id: feeder for feeder in snapshot.feeders}
+
+        assert next(item for item in snapshot.stationBreakers if item.id == "LV-BRK").breakerStatus == "closed"
+        assert feeders["F3"].breakerStatus == "tripped"
+        assert feeders["F3"].activePowerKw == 0
+        assert feeders["F1"].activePowerKw > 0
+        assert feeders["F2"].activePowerKw > 0
+
+    asyncio.run(run())
+
+
+def test_lv_breaker_close_is_blocked_when_closed_downstream_fault_is_active():
+    async def run():
+        app_state = _build_state()
+        await app_state.update_control("F2", FeederControlPatch(faultMode="sensor_fault"))
+        await _refresh_state(app_state)
 
         opened = await app_state.execute_breaker_command(
             CommandAction.OPEN_BREAKER,
@@ -125,11 +181,55 @@ def test_lv_breaker_close_is_blocked_when_downstream_trip_is_active():
     asyncio.run(run())
 
 
+def test_brk_in_can_close_with_lv_breaker_open_while_downstream_trip_stays_isolated():
+    async def run():
+        app_state = _build_state()
+        await app_state.update_control("F3", FeederControlPatch(loadKw=320.0))
+        await _refresh_state(app_state)
+
+        await app_state.execute_breaker_command(
+            CommandAction.OPEN_BREAKER,
+            BreakerCommandRequest(
+                objectId="LV-BRK",
+                operator="operator",
+                reason="Bus isolation",
+                confirmImpact=True,
+            ),
+        )
+        await app_state.execute_breaker_command(
+            CommandAction.OPEN_BREAKER,
+            BreakerCommandRequest(
+                objectId="BRK-IN",
+                operator="operator",
+                reason="Transformer isolation",
+                confirmImpact=True,
+            ),
+        )
+
+        restored = await app_state.execute_breaker_command(
+            CommandAction.CLOSE_BREAKER,
+            BreakerCommandRequest(objectId="BRK-IN", operator="operator", reason="Transformer restore first"),
+        )
+
+        assert restored.allowed is True
+
+        await _refresh_state(app_state)
+        snapshot = await app_state.get_snapshot()
+
+        assert next(item for item in snapshot.stationBreakers if item.id == "BRK-IN").breakerStatus == "closed"
+        assert next(item for item in snapshot.stationBreakers if item.id == "LV-BRK").breakerStatus == "open"
+        assert snapshot.transformer.secondaryVoltageV > 0
+        assert all(feeder.activePowerKw == 0 for feeder in snapshot.feeders)
+
+    asyncio.run(run())
+
+
 def test_close_breaker_is_blocked_when_trip_fault_is_active():
     async def run():
         app_state = _build_state()
         await app_state.apply_scenario("breaker_trip")
-        await _refresh_state(app_state)
+        scenario_started_at = datetime.fromisoformat(app_state._active_scenario_started_at) + timedelta(minutes=2)
+        await _refresh_state_at(app_state, scenario_started_at.isoformat())
 
         result = await app_state.execute_breaker_command(
             CommandAction.CLOSE_BREAKER,

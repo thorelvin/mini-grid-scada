@@ -35,6 +35,7 @@ class FeederType(str, Enum):
     INDUSTRY = "industry"
     EV_CHARGING = "ev_charging"
     SOLAR_PROSUMER = "solar_prosumer"
+    HYDRO_GENERATION = "hydro_generation"
 
 
 class FaultMode(str, Enum):
