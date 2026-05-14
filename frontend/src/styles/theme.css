@@ -2507,8 +2507,9 @@ input[type="range"] {
 
 .incident-section-header {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
 }
 
@@ -2582,6 +2583,145 @@ input[type="range"] {
 .incident-empty-state {
   display: grid;
   gap: 6px;
+}
+
+.incident-drill-section {
+  padding: 14px;
+  border: 1px solid rgba(127, 185, 197, 0.12);
+  border-radius: 18px;
+  background: rgba(10, 24, 36, 0.92);
+}
+
+.incident-drill-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.incident-drill-summary-card,
+.incident-drill-checkpoint,
+.incident-drill-step,
+.incident-drill-callout {
+  border: 1px solid rgba(127, 185, 197, 0.12);
+  border-radius: 14px;
+  background: rgba(13, 27, 40, 0.92);
+}
+
+.incident-drill-summary-card {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+}
+
+.incident-drill-summary-card span,
+.incident-drill-summary-card p,
+.incident-drill-checkpoint span,
+.incident-drill-step p,
+.incident-drill-step small,
+.incident-drill-callout p,
+.incident-drill-note-list p {
+  color: var(--muted);
+}
+
+.incident-drill-summary-card p,
+.incident-drill-step p,
+.incident-drill-step small,
+.incident-drill-callout p,
+.incident-drill-note-list p {
+  margin: 0;
+}
+
+.incident-drill-summary-card.tone-good,
+.incident-drill-checkpoint.tone-good,
+.incident-drill-callout.good {
+  border-color: rgba(141, 223, 87, 0.2);
+}
+
+.incident-drill-summary-card.tone-warn,
+.incident-drill-checkpoint.tone-warn,
+.incident-drill-callout.warn {
+  border-color: rgba(255, 171, 77, 0.24);
+}
+
+.incident-drill-checkpoint-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.incident-drill-checkpoint {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+.incident-drill-step-list {
+  display: grid;
+  gap: 10px;
+}
+
+.incident-drill-step {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 14px;
+  text-align: left;
+}
+
+.incident-drill-step:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
+.incident-drill-step.selected {
+  box-shadow: inset 0 0 0 1px rgba(103, 167, 255, 0.42);
+  background: rgba(16, 31, 44, 0.96);
+}
+
+.incident-drill-step:disabled {
+  cursor: default;
+}
+
+.incident-drill-step.tone-good {
+  border-color: rgba(141, 223, 87, 0.2);
+}
+
+.incident-drill-step.tone-warn {
+  border-color: rgba(255, 171, 77, 0.24);
+}
+
+.incident-drill-step-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.incident-drill-step-head strong {
+  min-width: 0;
+}
+
+.incident-drill-step-index {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: rgba(127, 185, 197, 0.12);
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.incident-drill-callout {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+}
+
+.incident-drill-list,
+.incident-drill-note-list {
+  display: grid;
+  gap: 8px;
 }
 
 .incident-report-preview {
@@ -2952,6 +3092,14 @@ input[type="range"] {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .incident-drill-summary-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .incident-drill-checkpoint-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .footer-stats-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
@@ -3005,6 +3153,10 @@ input[type="range"] {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .incident-drill-checkpoint-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .status-footer {
     flex-direction: column;
     align-items: stretch;
@@ -3031,7 +3183,8 @@ input[type="range"] {
   .impact-grid,
   .command-preview-grid,
   .station-preview-layout,
-  .footer-stats-grid {
+  .footer-stats-grid,
+  .incident-drill-checkpoint-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 

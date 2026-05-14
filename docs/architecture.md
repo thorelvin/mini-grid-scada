@@ -266,6 +266,7 @@ Implemented in the current version:
 - object-centric trends
 - replay with bookmarks and incident slices
 - incident center with package-ready report preview
+- guided station switching drills with restore checkpoints and playbook steps
 - simulator profiles, timed events, and fault scenarios
 - hydro generation support branch with dedicated controls and alarms
 - conservative switching flow and audit trail
@@ -275,7 +276,6 @@ Implemented in the current version:
 
 Next development packages:
 
-- branch-by-branch restore verification and guided station switching drills
 - richer incident exports with bundled screenshots or attached artifacts
 - replay comparison views between live state and sliced incident context
 - stronger printable handoff output for operator review

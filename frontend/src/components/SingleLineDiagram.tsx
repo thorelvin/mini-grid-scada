@@ -112,7 +112,21 @@ function getToneColor(tone: SymbolTone): string {
   }
 }
 
+function getPowerStateTone(state: RouteState, tone: SymbolTone): SymbolTone {
+  if (state === "open") {
+    return "neutral";
+  }
+
+  if (state === "tripped") {
+    return "critical";
+  }
+
+  return tone;
+}
+
 function getRouteStyle(tone: SymbolTone, state: RouteState, selected: boolean) {
+  const visualTone = getPowerStateTone(state, tone);
+
   if (state === "tripped") {
     return {
       color: "#ff6a68",
@@ -123,14 +137,14 @@ function getRouteStyle(tone: SymbolTone, state: RouteState, selected: boolean) {
 
   if (state === "open") {
     return {
-      color: getToneColor(tone),
+      color: getToneColor(visualTone),
       opacity: selected ? 0.34 : 0.18,
       strokeWidth: selected ? 4.8 : 3.4,
     };
   }
 
   return {
-    color: getToneColor(tone),
+    color: getToneColor(visualTone),
     opacity: 1,
     strokeWidth: selected ? 5.6 : 4.4,
   };
@@ -529,6 +543,8 @@ function renderNodeBox(
   content: ReactNode,
   footer: ReactNode,
 ) {
+  const visualTone = getPowerStateTone(powerState, tone);
+
   return (
     <g
       className={`diagram-node-group ${selected ? "selected" : ""} power-${powerState}`}
@@ -541,9 +557,9 @@ function renderNodeBox(
       }}
       role="button"
       tabIndex={0}
-    >
-      <rect
-        className={`diagram-svg-box ${selected ? "selected" : ""} tone-${tone} power-${powerState}`}
+      >
+        <rect
+        className={`diagram-svg-box ${selected ? "selected" : ""} tone-${visualTone} power-${powerState}`}
         x={box.x}
         y={box.y}
         width={box.width}
@@ -980,7 +996,7 @@ export function SingleLineDiagram({
               box: INLET_BOX,
               title: "NETTINNTAK",
               subtitle: null,
-              tone: supplyTone,
+              tone: getPowerStateTone(supplyRouteState, supplyTone),
               selected: inletSelected,
               onClick: () => onSelect("BRK-IN"),
               powerState: supplyRouteState,
@@ -998,7 +1014,13 @@ export function SingleLineDiagram({
               )}
             </>,
             <>
-              {renderPill(getRouteStateLabel(supplyRouteState), supplyTone, INLET_BOX.x + INLET_BOX.width - 138, INLET_BOX.y + 18, 120)}
+              {renderPill(
+                getRouteStateLabel(supplyRouteState),
+                getPowerStateTone(supplyRouteState, supplyTone),
+                INLET_BOX.x + INLET_BOX.width - 138,
+                INLET_BOX.y + 18,
+                120,
+              )}
               <text className="diagram-svg-footer tone-good" x={INLET_BOX.x + 20} y={INLET_BOX.y + INLET_BOX.height - 22}>
                 Innmating stabil
               </text>
@@ -1010,7 +1032,7 @@ export function SingleLineDiagram({
               box: TRANSFORMER_BOX,
               title: "T1 22/0.4 kV",
               subtitle: null,
-              tone: (transformerAlarm?.severity ?? "good") as SymbolTone,
+              tone: getPowerStateTone(transformerRouteState, (transformerAlarm?.severity ?? "good") as SymbolTone),
                 selected: transformerSelected,
                 onClick: () => onSelect("T1"),
                 powerState: transformerRouteState,
@@ -1029,7 +1051,7 @@ export function SingleLineDiagram({
             <>
               {renderPill(
                 getRouteStateLabel(transformerRouteState),
-                supplyTone,
+                getPowerStateTone(transformerRouteState, supplyTone),
                 transformerAlarm ? TRANSFORMER_BOX.x + TRANSFORMER_BOX.width - 272 : TRANSFORMER_BOX.x + TRANSFORMER_BOX.width - 136,
                 TRANSFORMER_BOX.y + 18,
                 transformerAlarm ? 112 : 118,
@@ -1049,6 +1071,7 @@ export function SingleLineDiagram({
           {displayFeeders.map((feeder, index) => {
             const feederAlarm = getStrongestAlarm(alarms, feeder.id);
             const tone = getFeederStateTone(feeder, feederAlarm) as SymbolTone;
+            const localRouteState = getRouteState(feeder.breakerStatus);
             const stateLabel = getFeederStateLabel(feeder, feederAlarm);
             const box: DiagramBox = {
               x: feederBoxX[index],
@@ -1062,7 +1085,8 @@ export function SingleLineDiagram({
               : `${formatSignedValue(feeder.activePowerKw)} kW | ${formatValue(feeder.derived.utilizationPercent, 0)} %`;
             const footerText = feederAlarm ? feederAlarm.title : "Normal drift";
             const isDimmed = selectedFeederId !== null && selectedFeederId !== feeder.id;
-            const powerState = busEnergized ? getRouteState(feeder.breakerStatus) : "open";
+            const powerState = busEnergized ? localRouteState : "open";
+            const visualTone = getPowerStateTone(powerState, tone);
             const customerMetricLabel =
               feeder.customers === 0 && (feeder.nominalGenerationEquivalentHomes ?? 0) > 0 ? "Boliger" : "Kunder";
             const customerMetricValue =
@@ -1111,13 +1135,13 @@ export function SingleLineDiagram({
                   <>
                     {renderPill(
                       getRouteStateLabel(powerState),
-                      powerState === "energized" ? "good" : powerState === "tripped" ? "critical" : "neutral",
+                      getPowerStateTone(powerState, "good"),
                       box.x + 18,
                       box.y + 18,
                       92,
                     )}
-                    {renderPill(stateLabel, tone, box.x + box.width - 82, box.y + 18, 64)}
-                    <text className={`diagram-svg-footer tone-${tone}`} x={box.x + 18} y={box.y + box.height - 24}>
+                    {renderPill(stateLabel, visualTone, box.x + box.width - 82, box.y + 18, 64)}
+                    <text className={`diagram-svg-footer tone-${visualTone}`} x={box.x + 18} y={box.y + box.height - 24}>
                       {truncateText(footerText, 30)}
                     </text>
                   </>,

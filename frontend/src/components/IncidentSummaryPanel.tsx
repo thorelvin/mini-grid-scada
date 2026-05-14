@@ -2,11 +2,13 @@ import { useState } from "react";
 
 import { formatVoltageRangeLabel, formatTime, getHighestPriorityAlarm, getQualityLabel, getSeverityLabel } from "../dashboard-utils";
 import {
+  buildStationDrillPlan,
   buildFocusFeeders,
   buildRecentTimeline,
   getRecommendedActions,
   inferProbableCause,
   isSelectableAssetId,
+  type DrillStepStatus,
   type IncidentReportSection,
   type IncidentHistoryScope,
 } from "../incident-utils";
@@ -26,6 +28,32 @@ interface IncidentSummaryPanelProps {
   onExportReport: () => void;
   onExportPackage: () => void;
   onChangeIncidentNotes: (value: string) => void;
+}
+
+function getDrillStepTone(status: DrillStepStatus): "good" | "warn" | "critical" | "neutral" {
+  switch (status) {
+    case "done":
+      return "good";
+    case "ready":
+      return "neutral";
+    case "blocked":
+      return "warn";
+    default:
+      return "neutral";
+  }
+}
+
+function getDrillStepLabel(status: DrillStepStatus): string {
+  switch (status) {
+    case "done":
+      return "Done";
+    case "ready":
+      return "Ready";
+    case "blocked":
+      return "Blocked";
+    default:
+      return "Pending";
+  }
 }
 
 export function IncidentSummaryPanel({
@@ -66,6 +94,10 @@ export function IncidentSummaryPanel({
   const focusFeeders = buildFocusFeeders(dashboard);
   const probableCause = inferProbableCause(dashboard, history);
   const scopedEventCount = recentTimeline.length;
+  const stationDrill = buildStationDrillPlan(dashboard);
+  const readyDrillSteps = stationDrill.steps.filter((step) => step.status === "ready").length;
+  const blockedDrillSteps = stationDrill.steps.filter((step) => step.status === "blocked").length;
+  const nextDrillStep = stationDrill.steps.find((step) => step.status === "ready" || step.status === "blocked");
 
   return (
     <section className="panel scada-panel incident-panel">
@@ -182,6 +214,97 @@ export function IncidentSummaryPanel({
             </div>
           )}
         </div>
+      </div>
+
+      <div className="incident-section incident-drill-section">
+        <div className="incident-section-header">
+          <h3>Guided station drill</h3>
+          <span>{stationDrill.activeBreakerId ?? "Standby"}</span>
+        </div>
+
+        <div className="incident-drill-summary-grid">
+          <article className={`incident-drill-summary-card tone-${stationDrill.blockers.length ? "warn" : stationDrill.activeBreakerId ? "neutral" : "good"}`}>
+            <span>Restore-status</span>
+            <strong>{stationDrill.headline}</strong>
+            <p>{stationDrill.posture}</p>
+          </article>
+          <article className="incident-drill-summary-card tone-neutral">
+            <span>Grenstatus</span>
+            <strong>
+              {stationDrill.branchSummary.ready} klare / {stationDrill.branchSummary.blocked} sperret
+            </strong>
+            <p>
+              {stationDrill.branchSummary.held} holdes ute / {stationDrill.branchSummary.live} allerede inne
+            </p>
+          </article>
+          <article className="incident-drill-summary-card tone-neutral">
+            <span>Neste operatortrekk</span>
+            <strong>{nextDrillStep?.title ?? "Ingen ventende restore-handling"}</strong>
+            <p>{nextDrillStep?.detail ?? "Stasjonsveien er allerede stabil pa stasjonsbryternivaa."}</p>
+          </article>
+        </div>
+
+        <div className="incident-drill-checkpoint-grid">
+          {stationDrill.checkpoints.map((checkpoint) => (
+            <article key={checkpoint.id} className={`incident-drill-checkpoint tone-${checkpoint.tone}`}>
+              <span>{checkpoint.label}</span>
+              <strong>{checkpoint.value}</strong>
+            </article>
+          ))}
+        </div>
+
+        <div className="incident-drill-step-list">
+          {stationDrill.steps.map((step, index) => {
+            const tone = getDrillStepTone(step.status);
+            const selected = step.assetId != null && selectedAssetId === step.assetId;
+
+            return (
+              <button
+                key={step.id}
+                type="button"
+                className={`incident-drill-step tone-${tone} ${selected ? "selected" : ""}`}
+                onClick={() => {
+                  if (step.assetId) {
+                    onSelectAsset(step.assetId);
+                  }
+                }}
+                disabled={!step.assetId}
+              >
+                <div className="incident-drill-step-head">
+                  <span className="incident-drill-step-index">{index + 1}</span>
+                  <strong>{step.title}</strong>
+                  <span className={`state-pill tone-${tone}`}>{getDrillStepLabel(step.status)}</span>
+                </div>
+                <p>{step.detail}</p>
+                {step.assetId ? <small>Apne {step.assetId} i objektpanelet</small> : null}
+              </button>
+            );
+          })}
+        </div>
+
+        {stationDrill.blockers.length ? (
+          <div className="incident-drill-callout warn">
+            <strong>{blockedDrillSteps} restore-steg er sperret</strong>
+            <div className="incident-drill-list">
+              {stationDrill.blockers.map((blocker) => (
+                <p key={blocker}>{blocker}</p>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="incident-drill-callout good">
+            <strong>{readyDrillSteps > 0 ? `${readyDrillSteps} restore-steg er klare` : "Stasjonsrestore er klar"}</strong>
+            <p>{nextDrillStep?.detail ?? "Ingen stasjonsnivaa-sperrer er aktive akkurat na."}</p>
+          </div>
+        )}
+
+        {stationDrill.notes.length ? (
+          <div className="incident-drill-note-list">
+            {stationDrill.notes.map((note) => (
+              <p key={note}>{note}</p>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       <div className="incident-layout">

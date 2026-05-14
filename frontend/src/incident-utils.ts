@@ -6,7 +6,7 @@ import {
   getSeverityLabel,
   sortAlarms,
 } from "./dashboard-utils";
-import { getBreakerOutcomeLabel, getTopologyImpactSummary } from "./topology-utils";
+import { getBreakerOutcomeLabel, getStationBreakerRestoreAssessment, getTopologyImpactSummary } from "./topology-utils";
 import type { Alarm, DashboardPayload, EventEntry, FeederTelemetry } from "./types";
 
 export interface IncidentReportSection {
@@ -29,6 +29,41 @@ export interface IncidentHistoryScope {
   endTimestamp: string | null;
 }
 
+export type DrillStepStatus = "done" | "ready" | "blocked" | "pending";
+
+export interface StationDrillStep {
+  id: string;
+  title: string;
+  detail: string;
+  status: DrillStepStatus;
+  assetId: string | null;
+}
+
+export interface StationDrillCheckpoint {
+  id: string;
+  label: string;
+  value: string;
+  tone: "good" | "warn" | "critical" | "neutral";
+}
+
+export interface StationDrillPlan {
+  headline: string;
+  posture: string;
+  activeBreakerId: "BRK-IN" | "LV-BRK" | null;
+  checkpoints: StationDrillCheckpoint[];
+  blockers: string[];
+  notes: string[];
+  steps: StationDrillStep[];
+  branchSummary: {
+    ready: number;
+    blocked: number;
+    held: number;
+    live: number;
+    totalCustomers: number;
+    criticalCustomers: number;
+  };
+}
+
 export interface IncidentExportPackage {
   packageVersion: string;
   generatedAt: string;
@@ -45,6 +80,7 @@ export interface IncidentExportPackage {
   notes: string | null;
   summary: IncidentReportSection[];
   reportMarkdown: string;
+  stationDrill: StationDrillPlan;
   activeAlarms: Alarm[];
   focusAssets: Array<{
     id: string;
@@ -259,6 +295,182 @@ function buildTelemetryLines(dashboard: DashboardPayload): string {
   return [`- T1: ${dashboard.snapshot.transformer.quality}`, ...feederLines].join("\n");
 }
 
+export function buildStationDrillPlan(dashboard: DashboardPayload): StationDrillPlan {
+  const inletAssessment = getStationBreakerRestoreAssessment(
+    dashboard.topology,
+    dashboard.snapshot,
+    dashboard.activeAlarms,
+    dashboard.controls,
+    "BRK-IN",
+  );
+  const busAssessment = getStationBreakerRestoreAssessment(
+    dashboard.topology,
+    dashboard.snapshot,
+    dashboard.activeAlarms,
+    dashboard.controls,
+    "LV-BRK",
+  );
+  const stationImpact = getTopologyImpactSummary(dashboard.topology, dashboard.snapshot, "LV-BRK");
+  const inletClosed = dashboard.snapshot.stationBreakers.find((breaker) => breaker.id === "BRK-IN")?.breakerStatus === "closed";
+  const lvClosed = dashboard.snapshot.stationBreakers.find((breaker) => breaker.id === "LV-BRK")?.breakerStatus === "closed";
+  const transformerHealthy =
+    dashboard.snapshot.transformer.quality === "good" && dashboard.snapshot.transformer.secondaryVoltageV > 40;
+  const degradedSignals =
+    dashboard.controls.filter((control) => control.communicationState !== "good").length +
+    (dashboard.snapshot.transformer.quality !== "good" ? 1 : 0);
+  const readyBranches = busAssessment.closeBranchPreview.filter((item) => item.action === "restore").length;
+  const blockedBranches = busAssessment.closeBranchPreview.filter((item) => item.action === "blocked").length;
+  const heldBranches = busAssessment.closeBranchPreview.filter(
+    (item) => item.action === "hold" || item.action === "already_out",
+  ).length;
+  const liveBranches = busAssessment.closeBranchPreview.filter((item) => item.action === "already_live").length;
+  const blockers = [...new Set([...inletAssessment.blockingReasons, ...busAssessment.blockingReasons])];
+  const notes = [...new Set([...inletAssessment.advisoryNotes, ...busAssessment.advisoryNotes])].slice(0, 4);
+
+  let headline = "Station path is healthy";
+  let posture = "No station-level restore steps are pending right now.";
+  let activeBreakerId: "BRK-IN" | "LV-BRK" | null = null;
+
+  if (!inletClosed) {
+    headline = "Start restore with BRK-IN";
+    posture = lvClosed
+      ? "Transformer path is open while the low-voltage breaker is still in. Treat BRK-IN as the first restore step."
+      : "Station path is isolated upstream. Energize the transformer first, then restore the bus.";
+    activeBreakerId = "BRK-IN";
+  } else if (!lvClosed) {
+    headline = "Transformer is live, bus is held out";
+    posture = "Use LV-BRK when downstream telemetry, trips, and alarms are ready for a controlled bus restore.";
+    activeBreakerId = "LV-BRK";
+  } else if (blockedBranches > 0) {
+    headline = "Bus is live, but some branches remain blocked";
+    posture = `${blockedBranches} downstream branches still require cleanup before full restoration is complete.`;
+    activeBreakerId = "LV-BRK";
+  } else if (heldBranches > 0) {
+    headline = "Bus is live with intentional branch isolation";
+    posture = `${heldBranches} branches are still held out and can be restored feeder-by-feeder when operations is ready.`;
+    activeBreakerId = "LV-BRK";
+  }
+
+  const steps: StationDrillStep[] = [
+    {
+      id: "review-posture",
+      title: "Review alarms and telemetry posture",
+      detail: blockers.length
+        ? `Clear ${blockers.length} blocking conditions before you continue station restore.`
+        : degradedSignals > 0 || dashboard.activeAlarms.length > 0
+          ? `${dashboard.activeAlarms.length} active alarms and ${degradedSignals} degraded signals should be reviewed before switching.`
+          : "Alarm and telemetry posture is already clean for station switching.",
+      status: blockers.length ? "blocked" : degradedSignals > 0 || dashboard.activeAlarms.length > 0 ? "ready" : "done",
+      assetId: activeBreakerId,
+    },
+    {
+      id: "close-brk-in",
+      title: "Restore or verify BRK-IN",
+      detail: inletClosed
+        ? "BRK-IN is already closed and the transformer path is available."
+        : inletAssessment.readyToClose
+          ? inletAssessment.nextAction
+          : inletAssessment.blockingReasons[0] ?? "BRK-IN still needs upstream review before closure.",
+      status: inletClosed ? "done" : inletAssessment.readyToClose ? "ready" : "blocked",
+      assetId: "BRK-IN",
+    },
+    {
+      id: "verify-transformer",
+      title: "Verify transformer secondary before bus restore",
+      detail: !inletClosed
+        ? "Close BRK-IN first, then confirm T1 secondary voltage and quality before touching the bus."
+        : transformerHealthy
+          ? `Transformer is healthy at ${Math.round(dashboard.snapshot.transformer.secondaryVoltageV)} V secondary.`
+          : "Transformer quality or secondary voltage is not yet healthy enough for controlled bus restore.",
+      status: !inletClosed ? "pending" : transformerHealthy ? "done" : "blocked",
+      assetId: "T1",
+    },
+    {
+      id: "close-lv-brk",
+      title: "Restore or verify LV-BRK",
+      detail: lvClosed
+        ? "LV-BRK is already closed and the low-voltage bus is energized."
+        : !inletClosed
+          ? "BRK-IN must be closed and transformer health verified before LV-BRK can restore the bus."
+          : busAssessment.readyToClose
+            ? busAssessment.nextAction
+            : busAssessment.blockingReasons[0] ?? "LV-BRK still requires downstream cleanup.",
+      status: lvClosed ? "done" : !inletClosed ? "pending" : busAssessment.readyToClose ? "ready" : "blocked",
+      assetId: "LV-BRK",
+    },
+    {
+      id: "verify-branches",
+      title: "Verify downstream branches one by one",
+      detail: !lvClosed
+        ? `${readyBranches} branches are queued for restore once the bus is back.`
+        : blockedBranches > 0
+          ? `${blockedBranches} branches remain blocked, ${readyBranches} can still be restored, and ${heldBranches} are intentionally held out.`
+          : heldBranches > 0
+            ? `${heldBranches} branches are intentionally held out. Restore them feeder-by-feeder when it is operationally safe.`
+            : "All downstream branches are energized or already accounted for in the current topology posture.",
+      status: !lvClosed ? "pending" : blockedBranches > 0 ? "blocked" : heldBranches > 0 ? "ready" : "done",
+      assetId: "LV-BRK",
+    },
+  ];
+
+  const checkpoints: StationDrillCheckpoint[] = [
+    {
+      id: "brk-in",
+      label: "BRK-IN",
+      value: inletClosed ? "Closed" : "Open",
+      tone: inletClosed ? "good" : "warn",
+    },
+    {
+      id: "t1-secondary",
+      label: "T1 secondary",
+      value: `${Math.round(dashboard.snapshot.transformer.secondaryVoltageV)} V`,
+      tone: transformerHealthy ? "good" : "warn",
+    },
+    {
+      id: "lv-brk",
+      label: "LV-BRK",
+      value: lvClosed ? "Closed" : "Open",
+      tone: lvClosed ? "good" : "warn",
+    },
+    {
+      id: "ready-branches",
+      label: "Ready branches",
+      value: String(readyBranches),
+      tone: readyBranches > 0 ? "good" : "neutral",
+    },
+    {
+      id: "blocked-branches",
+      label: "Blocked branches",
+      value: String(blockedBranches),
+      tone: blockedBranches > 0 ? "warn" : "good",
+    },
+    {
+      id: "held-branches",
+      label: "Held out",
+      value: String(heldBranches),
+      tone: heldBranches > 0 ? "neutral" : "good",
+    },
+  ];
+
+  return {
+    headline,
+    posture,
+    activeBreakerId,
+    checkpoints,
+    blockers,
+    notes,
+    steps,
+    branchSummary: {
+      ready: readyBranches,
+      blocked: blockedBranches,
+      held: heldBranches,
+      live: liveBranches,
+      totalCustomers: stationImpact?.totalCustomers ?? 0,
+      criticalCustomers: stationImpact?.criticalCustomers ?? 0,
+    },
+  };
+}
+
 export function buildIncidentReportPreview(
   dashboard: DashboardPayload,
   history: DashboardPayload[],
@@ -266,6 +478,7 @@ export function buildIncidentReportPreview(
   scopeLabel = "Hele vinduet",
   incidentNotes = "",
 ): IncidentReportSection[] {
+  const stationDrill = buildStationDrillPlan(dashboard);
   const highestAlarm = getHighestPriorityAlarm(dashboard.activeAlarms);
   const activeProfileName =
     dashboard.availableProfiles.find((profile) => profile.id === dashboard.activeProfileId)?.name ??
@@ -310,6 +523,18 @@ export function buildIncidentReportPreview(
       lines: recommendedActions,
     },
     {
+      id: "station-drill",
+      title: "Guided station drill",
+      tone: stationDrill.blockers.length ? "warn" : stationDrill.activeBreakerId ? "neutral" : "good",
+      lines: [
+        stationDrill.headline,
+        stationDrill.posture,
+        `Branches ready/blocked/held: ${stationDrill.branchSummary.ready}/${stationDrill.branchSummary.blocked}/${stationDrill.branchSummary.held}`,
+        stationDrill.steps.find((step) => step.status === "ready" || step.status === "blocked")?.detail ??
+          "No station-level restore action is pending right now.",
+      ],
+    },
+    {
       id: "telemetry",
       title: "Telemetry and timeline",
       tone: degradedTelemetry.length ? "warn" : "neutral",
@@ -341,6 +566,7 @@ export function buildIncidentReport(
   scopeLabel = "Hele vinduet",
   incidentNotes = "",
 ): string {
+  const stationDrill = buildStationDrillPlan(dashboard);
   const highestAlarm = getHighestPriorityAlarm(dashboard.activeAlarms);
   const activeProfileName =
     dashboard.availableProfiles.find((profile) => profile.id === dashboard.activeProfileId)?.name ??
@@ -420,6 +646,19 @@ export function buildIncidentReport(
     "## Recommended actions",
     ...recommendedActions.map((item) => `- ${item}`),
     "",
+    "## Guided station drill",
+    `Headline: ${stationDrill.headline}`,
+    `Posture: ${stationDrill.posture}`,
+    `Active breaker focus: ${stationDrill.activeBreakerId ?? "none"}`,
+    `Branches ready/blocked/held/live: ${stationDrill.branchSummary.ready}/${stationDrill.branchSummary.blocked}/${stationDrill.branchSummary.held}/${stationDrill.branchSummary.live}`,
+    ...(stationDrill.blockers.length
+      ? ["Blocking conditions:", ...stationDrill.blockers.map((item) => `- ${item}`)]
+      : ["Blocking conditions: none"]),
+    "Restore checklist:",
+    ...stationDrill.steps.map(
+      (step, index) => `${index + 1}. [${step.status.toUpperCase()}] ${step.title} - ${step.detail}`,
+    ),
+    "",
     "## Active alarms",
     alarmLines || "- None",
     "",
@@ -445,6 +684,7 @@ export function buildIncidentExportPackage(
   scope: IncidentHistoryScope,
   incidentNotes: string,
 ): IncidentExportPackage {
+  const stationDrill = buildStationDrillPlan(dashboard);
   const summary = buildIncidentReportPreview(dashboard, history, replayMode, scope.label, incidentNotes);
   const reportMarkdown = buildIncidentReport(dashboard, history, replayMode, scope.label, incidentNotes);
   const focusAssets = buildFocusFeeders(dashboard).map(({ feeder, affectedCustomers }) => ({
@@ -457,7 +697,7 @@ export function buildIncidentExportPackage(
   const events = buildRecentTimeline(history, 32).slice().reverse();
 
   return {
-    packageVersion: "0.2.0",
+    packageVersion: "0.3.0",
     generatedAt: new Date().toISOString(),
     stationId: dashboard.snapshot.stationId,
     mode: replayMode ? "replay" : "live",
@@ -472,6 +712,7 @@ export function buildIncidentExportPackage(
     notes: incidentNotes.trim() || null,
     summary,
     reportMarkdown,
+    stationDrill,
     activeAlarms: sortAlarms(dashboard.activeAlarms),
     focusAssets,
     events,

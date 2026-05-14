@@ -4,7 +4,7 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-0F172A?logo=fastapi&logoColor=00C7B7)
 ![React](https://img.shields.io/badge/React-0F172A?logo=react&logoColor=61DAFB)
 ![TypeScript](https://img.shields.io/badge/TypeScript-0F172A?logo=typescript&logoColor=3178C6)
-![Status](https://img.shields.io/badge/Status-v0.2.0-8ddf57)
+![Status](https://img.shields.io/badge/Status-v0.3.0-8ddf57)
 
 SCADA-inspired operator dashboard for a simulated low-voltage distribution station.
 
@@ -189,6 +189,7 @@ Implemented in this first release:
 - incident center with operator notes and package export
 - station breaker support for `BRK-IN` and `LV-BRK`
 - topology-aware impact summaries, restore previews, and station switching guidance
+- guided station switching drills with restore checkpoints and click-through playbook steps
 - hydro generation branch `F5 - Romstad Kraftverk`
 - simulator profiles, timed events, and fault scenarios
 - report export and event/audit flow
@@ -197,7 +198,6 @@ Implemented in this first release:
 
 Planned next development packages:
 
-- branch-by-branch restore verification and guided station switching drills
 - station switching drills with scripted recovery playbooks
 - richer incident exports with bundled screenshots or attached artifacts
 - deeper replay comparison views between live state and incident slices
