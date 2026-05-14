@@ -1,5 +1,6 @@
 # Tensio Demo SCADA
 
+[![Checks](https://github.com/thorelvin/mini-grid-scada/actions/workflows/checks.yml/badge.svg)](https://github.com/thorelvin/mini-grid-scada/actions/workflows/checks.yml)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0F172A?logo=fastapi&logoColor=00C7B7)
 ![React](https://img.shields.io/badge/React-0F172A?logo=react&logoColor=61DAFB)

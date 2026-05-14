@@ -334,8 +334,12 @@ function renderHorizontalBreaker(
   status: BreakerStatus,
   tone: SymbolTone,
   selected: boolean,
+  stateOverride?: RouteState,
 ) {
-  const style = getRouteStyle(tone, getRouteState(status), selected);
+  const routeState = stateOverride ?? getRouteState(status);
+  const style = getRouteStyle(tone, routeState, selected);
+  const displayStatus: BreakerStatus =
+    routeState === "open" ? "open" : routeState === "tripped" ? "tripped" : status;
 
   return (
     <g>
@@ -361,7 +365,7 @@ function renderHorizontalBreaker(
       />
       <circle cx={x - 12} cy={y} r={5.5} fill={style.color} fillOpacity={style.opacity} />
       <circle cx={x + 12} cy={y} r={5.5} fill={style.color} fillOpacity={style.opacity} />
-      {status === "closed" ? (
+      {displayStatus === "closed" ? (
         <line
           x1={x - 12}
           y1={y}
@@ -382,7 +386,7 @@ function renderHorizontalBreaker(
           strokeLinecap="round"
         />
       )}
-      {status === "tripped" ? (
+      {displayStatus === "tripped" ? (
         <path d={`M ${x + 24} ${y - 22} l -10 16 h 9 l -7 15 l 20 -21 h -9 l 8 -10 z`} className="diagram-svg-trip" />
       ) : null}
     </g>
@@ -395,9 +399,19 @@ function renderVerticalBreaker(
   status: BreakerStatus,
   tone: SymbolTone,
   selected: boolean,
+  stateOverride?: RouteState,
 ) {
-  const style = getRouteStyle(tone, getRouteState(status), selected);
+  const routeState = stateOverride ?? getRouteState(status);
+  const style = getRouteStyle(tone, routeState, selected);
+  const displayStatus: BreakerStatus =
+    routeState === "open" ? "open" : routeState === "tripped" ? "tripped" : status;
   const capLength = 20;
+  const capStroke =
+    routeState === "tripped"
+      ? "rgba(255, 182, 182, 0.92)"
+      : routeState === "open"
+        ? "rgba(171, 184, 194, 0.72)"
+        : "rgba(216, 229, 238, 0.82)";
 
   return (
     <g>
@@ -423,7 +437,7 @@ function renderVerticalBreaker(
       />
       <circle cx={x} cy={y - 12} r={5.5} fill={style.color} fillOpacity={style.opacity} />
       <circle cx={x} cy={y + 12} r={5.5} fill={style.color} fillOpacity={style.opacity} />
-      {status === "closed" ? (
+      {displayStatus === "closed" ? (
         <line
           x1={x}
           y1={y - 12}
@@ -449,7 +463,7 @@ function renderVerticalBreaker(
         y1={y - 58}
         x2={x + capLength / 2}
         y2={y - 58}
-        stroke="rgba(216, 229, 238, 0.82)"
+        stroke={capStroke}
         strokeWidth={4}
         strokeLinecap="round"
       />
@@ -458,11 +472,11 @@ function renderVerticalBreaker(
         y1={y + 58}
         x2={x + capLength / 2}
         y2={y + 58}
-        stroke="rgba(216, 229, 238, 0.82)"
+        stroke={capStroke}
         strokeWidth={4}
         strokeLinecap="round"
       />
-      {status === "tripped" ? (
+      {displayStatus === "tripped" ? (
         <path d={`M ${x + 20} ${y - 42} l -10 16 h 9 l -7 15 l 20 -21 h -9 l 8 -10 z`} className="diagram-svg-trip" />
       ) : null}
     </g>
@@ -909,6 +923,7 @@ export function SingleLineDiagram({
                   lvBreakerStatus,
                   supplyTone,
                   lvBreakerSelected,
+                  busRouteState,
                 )}
                 <text
                   className="diagram-svg-annotation"
@@ -974,7 +989,14 @@ export function SingleLineDiagram({
                     state: upperState,
                     selected: selectedAssetId === feeder.id,
                   })}
-                  {renderVerticalBreaker(centerX, FEEDER_BREAKER_Y, feeder.breakerStatus, tone, selectedAssetId === feeder.id)}
+                  {renderVerticalBreaker(
+                    centerX,
+                    FEEDER_BREAKER_Y,
+                    feeder.breakerStatus,
+                    tone,
+                    selectedAssetId === feeder.id,
+                    lowerState,
+                  )}
                   {renderRouteSegment({
                     x1: centerX,
                     y1: FEEDER_BREAKER_Y + 58,
@@ -1072,7 +1094,6 @@ export function SingleLineDiagram({
             const feederAlarm = getStrongestAlarm(alarms, feeder.id);
             const tone = getFeederStateTone(feeder, feederAlarm) as SymbolTone;
             const localRouteState = getRouteState(feeder.breakerStatus);
-            const stateLabel = getFeederStateLabel(feeder, feederAlarm);
             const box: DiagramBox = {
               x: feederBoxX[index],
               y: FEEDER_BOX_Y,
@@ -1083,10 +1104,12 @@ export function SingleLineDiagram({
             const subtitle = showValues
               ? null
               : `${formatSignedValue(feeder.activePowerKw)} kW | ${formatValue(feeder.derived.utilizationPercent, 0)} %`;
-            const footerText = feederAlarm ? feederAlarm.title : "Normal drift";
             const isDimmed = selectedFeederId !== null && selectedFeederId !== feeder.id;
             const powerState = busEnergized ? localRouteState : "open";
             const visualTone = getPowerStateTone(powerState, tone);
+            const stateLabel = powerState === "open" ? "SPENNINGSLØS" : getFeederStateLabel(feeder, feederAlarm);
+            const footerText =
+              powerState === "open" ? "Frakoblet oppstrøms" : feederAlarm ? feederAlarm.title : "Normal drift";
             const customerMetricLabel =
               feeder.customers === 0 && (feeder.nominalGenerationEquivalentHomes ?? 0) > 0 ? "Boliger" : "Kunder";
             const customerMetricValue =
