@@ -25,8 +25,9 @@ jobs:
         run: python -m pip install -e ".[dev]"
 
       - name: Run backend tests
-        working-directory: backend
-        run: pytest tests -q
+        run: python -m pytest backend/tests -q
+        env:
+          PYTHONPATH: .
 
   frontend:
     name: Frontend build
