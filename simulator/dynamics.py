@@ -49,6 +49,7 @@ NORMAL_PROFILE_LIBRARY: dict[str, dict[str, object]] = {
                 "load": [(0.0, 0.92), (0.4, 0.84), (0.76, 0.9), (1.0, 0.92)],
                 "reactive": [(0.0, 1.0), (1.0, 1.0)],
                 "solar": [(0.0, 0.92), (0.24, 0.98), (0.52, 1.06), (0.82, 0.96), (1.0, 0.92)],
+                "waterFlow": [(0.0, 0.88), (0.24, 0.94), (0.52, 1.0), (0.82, 0.92), (1.0, 0.88)],
                 "imbalance": [(0.0, 1.8), (1.0, 1.8)],
             },
         },
@@ -87,6 +88,7 @@ NORMAL_PROFILE_LIBRARY: dict[str, dict[str, object]] = {
                 "load": [(0.0, 0.94), (0.44, 0.9), (1.0, 0.94)],
                 "reactive": [(0.0, 1.0), (1.0, 1.0)],
                 "solar": [(0.0, 1.04), (0.22, 1.1), (0.56, 1.18), (0.82, 1.08), (1.0, 1.04)],
+                "waterFlow": [(0.0, 0.94), (0.22, 1.02), (0.56, 1.08), (0.82, 1.0), (1.0, 0.94)],
                 "imbalance": [(0.0, 1.6), (1.0, 1.6)],
             },
         },
@@ -125,6 +127,7 @@ NORMAL_PROFILE_LIBRARY: dict[str, dict[str, object]] = {
                 "load": [(0.0, 0.88), (0.38, 0.82), (0.7, 0.9), (1.0, 0.88)],
                 "reactive": [(0.0, 1.0), (1.0, 1.0)],
                 "solar": [(0.0, 0.94), (0.28, 1.0), (0.54, 1.08), (0.82, 0.98), (1.0, 0.94)],
+                "waterFlow": [(0.0, 0.9), (0.28, 0.96), (0.54, 1.02), (0.82, 0.98), (1.0, 0.9)],
                 "imbalance": [(0.0, 1.7), (1.0, 1.7)],
             },
         },
@@ -163,6 +166,7 @@ NORMAL_PROFILE_LIBRARY: dict[str, dict[str, object]] = {
                 "load": [(0.0, 0.9), (0.42, 0.84), (0.74, 0.92), (1.0, 0.9)],
                 "reactive": [(0.0, 1.0), (1.0, 1.0)],
                 "solar": [(0.0, 0.96), (0.22, 1.04), (0.38, 0.86), (0.58, 1.08), (0.78, 0.92), (1.0, 0.96)],
+                "waterFlow": [(0.0, 0.92), (0.22, 0.98), (0.38, 0.94), (0.58, 1.02), (0.78, 0.96), (1.0, 0.92)],
                 "imbalance": [(0.0, 1.9), (1.0, 1.9)],
             },
         },
@@ -318,6 +322,7 @@ def sample_profile(
         reactive_multiplier = _interpolate(schedules.get("reactive", []), position, 1.0)
         imbalance = _interpolate(schedules.get("imbalance", []), position, control.phaseImbalancePercent)
         solar_multiplier = _interpolate(schedules.get("solar", []), position, 1.0)
+        water_flow_multiplier = _interpolate(schedules.get("waterFlow", []), position, 1.0)
 
         controls.append(
             control.model_copy(
@@ -326,6 +331,7 @@ def sample_profile(
                     "reactivePowerKvar": round(control.reactivePowerKvar * reactive_multiplier, 1),
                     "phaseImbalancePercent": round(imbalance, 1),
                     "solarKw": round(control.solarKw * solar_multiplier, 1),
+                    "waterFlowPercent": round(control.waterFlowPercent * water_flow_multiplier, 1),
                 }
             )
         )
@@ -408,6 +414,14 @@ def apply_timed_events(
             if "solarMultiplier" in effect:
                 multiplier = 1.0 + ((float(effect["solarMultiplier"]) - 1.0) * strength)
                 updates["solarKw"] = round(control.solarKw * multiplier, 1)
+            if "waterFlowMultiplier" in effect:
+                multiplier = 1.0 + ((float(effect["waterFlowMultiplier"]) - 1.0) * strength)
+                updates["waterFlowPercent"] = round(control.waterFlowPercent * multiplier, 1)
+            if "waterFlowDelta" in effect:
+                updates["waterFlowPercent"] = round(
+                    control.waterFlowPercent + (float(effect["waterFlowDelta"]) * strength),
+                    1,
+                )
             if "phaseImbalanceDelta" in effect:
                 updates["phaseImbalancePercent"] = round(
                     control.phaseImbalancePercent + (float(effect["phaseImbalanceDelta"]) * strength),

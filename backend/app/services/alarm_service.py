@@ -66,6 +66,54 @@ def evaluate_snapshot(snapshot: StationSnapshot) -> list[Alarm]:
                 )
             )
 
+        if feeder.type == "hydro_generation":
+            water_flow_percent = feeder.waterFlowPercent or 0.0
+            generation_setpoint_kw = feeder.generationSetpointKw or 0.0
+            available_generation_kw = feeder.availableGenerationKw or 0.0
+
+            if feeder.breakerStatus == BreakerStatus.CLOSED and water_flow_percent < 38:
+                alarms.append(
+                    _alarm(
+                        feeder.id,
+                        feeder.name,
+                        AlarmSeverity.HIGH,
+                        "Low water flow",
+                        "Available water flow is below the preferred operating band for hydro generation.",
+                        measured=water_flow_percent,
+                        threshold=38,
+                        unit="%",
+                    )
+                )
+
+            if (
+                feeder.breakerStatus == BreakerStatus.CLOSED
+                and generation_setpoint_kw > 0
+                and available_generation_kw + 8 < generation_setpoint_kw
+            ):
+                alarms.append(
+                    _alarm(
+                        feeder.id,
+                        feeder.name,
+                        AlarmSeverity.MEDIUM,
+                        "Hydro generation derated",
+                        "The turbine cannot meet the requested production setpoint with current hydraulic conditions.",
+                        measured=available_generation_kw,
+                        threshold=generation_setpoint_kw,
+                        unit="kW",
+                    )
+                )
+
+            if feeder.quality == DataQuality.ESTIMATED and water_flow_percent < 60:
+                alarms.append(
+                    _alarm(
+                        feeder.id,
+                        feeder.name,
+                        AlarmSeverity.HIGH,
+                        "Intake restriction suspected",
+                        "Estimated hydro telemetry together with reduced flow suggests intake debris or restriction.",
+                    )
+                )
+
         if min_voltage > 0 and min_voltage < 207:
             alarms.append(
                 _alarm(

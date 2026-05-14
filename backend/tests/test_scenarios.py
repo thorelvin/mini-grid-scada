@@ -94,7 +94,9 @@ def test_hydro_low_flow_reduces_generation_support_without_tripping_f5():
         f5 = next(feeder for feeder in snapshot.feeders if feeder.id == "F5")
 
         assert f5.breakerStatus == "closed"
+        assert (f5.waterFlowPercent or 0) < (baseline_f5.waterFlowPercent or 100)
         assert f5.activePowerKw > baseline_f5.activePowerKw
+        assert (f5.availableGenerationKw or 0) < (baseline_f5.availableGenerationKw or 0)
         assert (f5.generationEquivalentHomes or 0) < (baseline_f5.generationEquivalentHomes or 0)
 
     asyncio.run(run())

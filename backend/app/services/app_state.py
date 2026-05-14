@@ -100,6 +100,8 @@ def _build_trends(
     voltage_window_sec: int,
     current_window_sec: int,
     active_power_window_sec: int,
+    water_flow_window_sec: int,
+    generation_support_window_sec: int,
     transformer_window_sec: int,
     max_points: int,
 ) -> DashboardTrends:
@@ -108,9 +110,13 @@ def _build_trends(
     voltage_l3_series: list[TrendSeries] = []
     current_series: list[TrendSeries] = []
     active_power_series: list[TrendSeries] = []
+    water_flow_series: list[TrendSeries] = []
+    generation_support_series: list[TrendSeries] = []
     voltage_history = _filter_history_window(history, voltage_window_sec)
     current_history = _filter_history_window(history, current_window_sec)
     active_power_history = _filter_history_window(history, active_power_window_sec)
+    water_flow_history = _filter_history_window(history, water_flow_window_sec)
+    generation_support_history = _filter_history_window(history, generation_support_window_sec)
     transformer_history = _filter_history_window(history, transformer_window_sec)
 
     feeder_ids = tuple(feeder.id for feeder in history[-1].feeders) if history else ()
@@ -120,6 +126,8 @@ def _build_trends(
         voltage_l3_points: list[tuple[str, float]] = []
         current_points: list[tuple[str, float]] = []
         active_power_points: list[tuple[str, float]] = []
+        water_flow_points: list[tuple[str, float]] = []
+        generation_support_points: list[tuple[str, float]] = []
         for snapshot in voltage_history:
             feeder = next((item for item in snapshot.feeders if item.id == feeder_id), None)
             if feeder is None:
@@ -142,6 +150,16 @@ def _build_trends(
             if feeder is None:
                 continue
             active_power_points.append((snapshot.timestamp, feeder.activePowerKw))
+        for snapshot in water_flow_history:
+            feeder = next((item for item in snapshot.feeders if item.id == feeder_id), None)
+            if feeder is None or feeder.waterFlowPercent is None:
+                continue
+            water_flow_points.append((snapshot.timestamp, feeder.waterFlowPercent))
+        for snapshot in generation_support_history:
+            feeder = next((item for item in snapshot.feeders if item.id == feeder_id), None)
+            if feeder is None or feeder.generationEquivalentHomes is None:
+                continue
+            generation_support_points.append((snapshot.timestamp, float(feeder.generationEquivalentHomes)))
 
         voltage_l1_series.append(
             _trend_series(
@@ -189,6 +207,25 @@ def _build_trends(
                 values=_downsample_values(active_power_points, max_points),
             )
         )
+        if water_flow_points:
+            water_flow_series.append(
+                _trend_series(
+                    series_id=feeder_id,
+                    label=feeder_id,
+                    unit="%",
+                    values=_downsample_values(water_flow_points, max_points),
+                    threshold_low=38.0,
+                )
+            )
+        if generation_support_points:
+            generation_support_series.append(
+                _trend_series(
+                    series_id=feeder_id,
+                    label=feeder_id,
+                    unit="boliger",
+                    values=_downsample_values(generation_support_points, max_points),
+                )
+            )
 
     transformer_values = [
         (snapshot.timestamp, snapshot.transformer.loadPercent)
@@ -210,6 +247,8 @@ def _build_trends(
         voltageL3=voltage_l3_series,
         currentMax=current_series,
         activePower=active_power_series,
+        waterFlowPercent=water_flow_series,
+        generationSupportHomes=generation_support_series,
         transformerLoad=transformer_series,
     )
 
@@ -946,6 +985,8 @@ class AppState:
         voltage_window_sec: int | None = None,
         current_window_sec: int | None = None,
         active_power_window_sec: int | None = None,
+        water_flow_window_sec: int | None = None,
+        generation_support_window_sec: int | None = None,
         transformer_window_sec: int | None = None,
     ) -> DashboardTrends:
         async with self._lock:
@@ -956,6 +997,8 @@ class AppState:
             voltage_window_sec=voltage_window_sec or default_window_sec,
             current_window_sec=current_window_sec or default_window_sec,
             active_power_window_sec=active_power_window_sec or default_window_sec,
+            water_flow_window_sec=water_flow_window_sec or default_window_sec,
+            generation_support_window_sec=generation_support_window_sec or default_window_sec,
             transformer_window_sec=transformer_window_sec or default_window_sec,
             max_points=settings.trend_max_points,
         )

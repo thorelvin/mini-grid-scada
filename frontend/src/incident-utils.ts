@@ -22,6 +22,40 @@ export interface FeederFocusCard {
   affectedCustomers: number;
 }
 
+export interface IncidentHistoryScope {
+  id: string;
+  label: string;
+  startTimestamp: string | null;
+  endTimestamp: string | null;
+}
+
+export interface IncidentExportPackage {
+  packageVersion: string;
+  generatedAt: string;
+  stationId: string;
+  mode: "live" | "replay";
+  scope: {
+    id: string;
+    label: string;
+    startTimestamp: string | null;
+    endTimestamp: string | null;
+    frameCount: number;
+    eventCount: number;
+  };
+  notes: string | null;
+  summary: IncidentReportSection[];
+  reportMarkdown: string;
+  activeAlarms: Alarm[];
+  focusAssets: Array<{
+    id: string;
+    name: string;
+    affectedCustomers: number;
+    utilizationPercent: number;
+    breakerStatus: string;
+  }>;
+  events: EventEntry[];
+}
+
 function severityRank(alarm: Alarm | null): number {
   if (!alarm) {
     return 0;
@@ -59,6 +93,24 @@ export function buildRecentTimeline(history: DashboardPayload[], limit = 12): Ev
   return [...byId.values()]
     .sort((left, right) => new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime())
     .slice(0, limit);
+}
+
+export function sliceHistoryByTimestamp(
+  history: DashboardPayload[],
+  startTimestamp: string | null,
+  endTimestamp: string | null,
+): DashboardPayload[] {
+  if (!startTimestamp && !endTimestamp) {
+    return history;
+  }
+
+  const startMs = startTimestamp ? new Date(startTimestamp).getTime() : Number.NEGATIVE_INFINITY;
+  const endMs = endTimestamp ? new Date(endTimestamp).getTime() : Number.POSITIVE_INFINITY;
+
+  return history.filter((frame) => {
+    const frameMs = new Date(frame.snapshot.timestamp).getTime();
+    return frameMs >= startMs && frameMs <= endMs;
+  });
 }
 
 export function getRecommendedActions(dashboard: DashboardPayload): string[] {
@@ -211,6 +263,8 @@ export function buildIncidentReportPreview(
   dashboard: DashboardPayload,
   history: DashboardPayload[],
   replayMode: boolean,
+  scopeLabel = "Hele vinduet",
+  incidentNotes = "",
 ): IncidentReportSection[] {
   const highestAlarm = getHighestPriorityAlarm(dashboard.activeAlarms);
   const activeProfileName =
@@ -234,6 +288,7 @@ export function buildIncidentReportPreview(
       tone: highestAlarm ? (highestAlarm.severity === "critical" ? "critical" : "warn") : "good",
       lines: [
         `${formatDate(dashboard.snapshot.timestamp)} ${formatTime(dashboard.snapshot.timestamp)} / ${replayMode ? "Replay" : "Live"}`,
+        `Scope: ${scopeLabel}`,
         describeSystemPosture(dashboard),
         inferProbableCause(dashboard, history),
       ],
@@ -263,6 +318,19 @@ export function buildIncidentReportPreview(
         ...timeline.map((event) => `${formatTime(event.timestamp)} ${event.source}: ${event.description}`),
       ],
     },
+    ...(incidentNotes.trim()
+      ? [
+          {
+            id: "notes",
+            title: "Operator notes",
+            tone: "neutral" as const,
+            lines: incidentNotes
+              .split(/\r?\n/)
+              .map((line) => line.trim())
+              .filter(Boolean),
+          },
+        ]
+      : []),
   ];
 }
 
@@ -270,6 +338,8 @@ export function buildIncidentReport(
   dashboard: DashboardPayload,
   history: DashboardPayload[],
   replayMode: boolean,
+  scopeLabel = "Hele vinduet",
+  incidentNotes = "",
 ): string {
   const highestAlarm = getHighestPriorityAlarm(dashboard.activeAlarms);
   const activeProfileName =
@@ -313,6 +383,7 @@ export function buildIncidentReport(
     "## Executive summary",
     `Timestamp: ${formatDate(dashboard.snapshot.timestamp)} ${formatTime(dashboard.snapshot.timestamp)}`,
     `Mode: ${replayMode ? "Replay frame" : "Live dashboard"}`,
+    `Scope: ${scopeLabel}`,
     `Station: ${dashboard.snapshot.stationId}`,
     `System posture: ${describeSystemPosture(dashboard)}`,
     `Probable cause: ${inferProbableCause(dashboard, history)}`,
@@ -357,5 +428,52 @@ export function buildIncidentReport(
     "",
     "## Feeder state",
     buildFeederReportLines(dashboard),
+    ...(incidentNotes.trim()
+      ? [
+          "",
+          "## Operator notes",
+          incidentNotes.trim(),
+        ]
+      : []),
   ].join("\n");
+}
+
+export function buildIncidentExportPackage(
+  dashboard: DashboardPayload,
+  history: DashboardPayload[],
+  replayMode: boolean,
+  scope: IncidentHistoryScope,
+  incidentNotes: string,
+): IncidentExportPackage {
+  const summary = buildIncidentReportPreview(dashboard, history, replayMode, scope.label, incidentNotes);
+  const reportMarkdown = buildIncidentReport(dashboard, history, replayMode, scope.label, incidentNotes);
+  const focusAssets = buildFocusFeeders(dashboard).map(({ feeder, affectedCustomers }) => ({
+    id: feeder.id,
+    name: feeder.name,
+    affectedCustomers,
+    utilizationPercent: feeder.derived.utilizationPercent,
+    breakerStatus: feeder.breakerStatus,
+  }));
+  const events = buildRecentTimeline(history, 32).slice().reverse();
+
+  return {
+    packageVersion: "0.2.0",
+    generatedAt: new Date().toISOString(),
+    stationId: dashboard.snapshot.stationId,
+    mode: replayMode ? "replay" : "live",
+    scope: {
+      id: scope.id,
+      label: scope.label,
+      startTimestamp: scope.startTimestamp,
+      endTimestamp: scope.endTimestamp,
+      frameCount: history.length,
+      eventCount: events.length,
+    },
+    notes: incidentNotes.trim() || null,
+    summary,
+    reportMarkdown,
+    activeAlarms: sortAlarms(dashboard.activeAlarms),
+    focusAssets,
+    events,
+  };
 }

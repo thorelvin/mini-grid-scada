@@ -361,3 +361,45 @@ def test_refresh_now_preserves_other_live_feeders_after_manual_update():
             await simulator.stop()
 
     asyncio.run(run())
+
+
+def test_hydro_reclose_is_blocked_when_water_flow_is_too_low():
+    async def run():
+        app_state = _build_state()
+        await app_state.update_control("F5", FeederControlPatch(waterFlowPercent=20.0, breakerStatus="open"))
+        await _refresh_state(app_state)
+
+        result = await app_state.execute_breaker_command(
+            CommandAction.CLOSE_BREAKER,
+            BreakerCommandRequest(objectId="F5", operator="operator", reason="Try hydro restore"),
+        )
+
+        assert result.allowed is False
+        assert any("water flow" in reason.lower() for reason in result.interlock.reasons)
+
+    asyncio.run(run())
+
+
+def test_hydro_reclose_is_blocked_when_intake_restriction_is_suspected():
+    async def run():
+        app_state = _build_state()
+        await app_state.update_control(
+            "F5",
+            FeederControlPatch(
+                breakerStatus="open",
+                waterFlowPercent=42.0,
+                communicationState="estimated",
+                solarKw=94.0,
+            ),
+        )
+        await _refresh_state(app_state)
+
+        result = await app_state.execute_breaker_command(
+            CommandAction.CLOSE_BREAKER,
+            BreakerCommandRequest(objectId="F5", operator="operator", reason="Try hydro restore"),
+        )
+
+        assert result.allowed is False
+        assert any("hydro" in reason.lower() or "intake" in reason.lower() for reason in result.interlock.reasons)
+
+    asyncio.run(run())

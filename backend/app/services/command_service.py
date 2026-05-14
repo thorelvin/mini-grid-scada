@@ -29,6 +29,16 @@ def _get_reclose_block_reason(
     control: FeederControlInput,
     object_alarms: list[Alarm],
 ) -> str | None:
+    if feeder.type == "hydro_generation":
+        if (feeder.waterFlowPercent or 0.0) < 24:
+            return "Closing blocked: water flow is below minimum start threshold for hydro generation."
+
+        if any(
+            alarm.title in {"Low water flow", "Intake restriction suspected"}
+            for alarm in object_alarms
+        ):
+            return "Closing blocked: hydro-specific alarms indicate that water intake or flow is not yet stable."
+
     if control.faultMode == FaultMode.FORCED_TRIP:
         return "Closing blocked: a forced trip condition is still present."
 
@@ -124,6 +134,8 @@ def evaluate_breaker_command(
         reasons.append("Closing blocked: an unacknowledged critical alarm is active.")
     if any(alarm.title == "Communication degraded" for alarm in object_alarms):
         reasons.append("Closing blocked: the feeder has a communication-quality alarm.")
+    if feeder.type == "hydro_generation" and feeder.quality == DataQuality.ESTIMATED:
+        reasons.append("Closing blocked: hydro telemetry is estimated and intake conditions should be inspected first.")
 
     allowed = not reasons
     interlock = InterlockDecision(

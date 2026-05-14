@@ -10,14 +10,23 @@ import {
 } from "../dashboard-utils";
 import type { DashboardPayload, EventEntry } from "../types";
 
+interface ReplaySliceScope {
+  id: string;
+  label: string;
+  startTimestamp: string | null;
+  endTimestamp: string | null;
+}
+
 interface ReplayTimelineProps {
   history: DashboardPayload[];
   replayIndex: number | null;
   isPlaying: boolean;
+  activeSliceId: string;
   onSelectIndex: (index: number) => void;
   onStep: (delta: number) => void;
   onTogglePlay: () => void;
   onJumpLive: () => void;
+  onApplySlice: (scope: ReplaySliceScope) => void;
 }
 
 interface TimelineMarker {
@@ -182,10 +191,12 @@ export function ReplayTimeline({
   history,
   replayIndex,
   isPlaying,
+  activeSliceId,
   onSelectIndex,
   onStep,
   onTogglePlay,
   onJumpLive,
+  onApplySlice,
 }: ReplayTimelineProps) {
   const [activeFilter, setActiveFilter] = useState<ReplayFilter>("all");
 
@@ -205,10 +216,38 @@ export function ReplayTimeline({
   const nearestFilteredMarkerIndex = findNearestMarkerIndex(filteredMarkers, clampedIndex);
   const currentMarker =
     nearestFilteredMarkerIndex != null ? filteredMarkers[nearestFilteredMarkerIndex] : null;
+  const anchorTimestamp = currentMarker?.event.timestamp ?? currentFrame.snapshot.timestamp;
+  const anchorMs = new Date(anchorTimestamp).getTime();
   const profileName =
     currentFrame.availableProfiles.find((profile) => profile.id === currentFrame.activeProfileId)?.name ??
     currentFrame.activeProfileId ??
     "Manuell drift";
+  const slicePresets: ReplaySliceScope[] = [
+    {
+      id: "full",
+      label: "Hele vinduet",
+      startTimestamp: null,
+      endTimestamp: null,
+    },
+    {
+      id: "event-30s",
+      label: "30 s rundt hendelse",
+      startTimestamp: new Date(anchorMs - 30_000).toISOString(),
+      endTimestamp: new Date(anchorMs + 30_000).toISOString(),
+    },
+    {
+      id: "event-2m",
+      label: "2 min rundt hendelse",
+      startTimestamp: new Date(anchorMs - 120_000).toISOString(),
+      endTimestamp: new Date(anchorMs + 120_000).toISOString(),
+    },
+    {
+      id: "from-first-alarm",
+      label: "Fra forste alarm",
+      startTimestamp: bookmarks.find((bookmark) => bookmark.label === "Forste alarm")?.marker.event.timestamp ?? historyStart,
+      endTimestamp: historyEnd,
+    },
+  ];
 
   function jumpToMarker(direction: -1 | 1) {
     if (filteredMarkers.length === 0) {
@@ -256,6 +295,19 @@ export function ReplayTimeline({
           <strong>{profileName}</strong>
           <p>{highestAlarm ? `${getSeverityLabel(highestAlarm.severity)}: ${highestAlarm.title}` : "Ingen aktive alarmer"}</p>
         </div>
+      </div>
+
+      <div className="replay-slice-row">
+        {slicePresets.map((scope) => (
+          <button
+            key={scope.id}
+            type="button"
+            className={`replay-slice-pill ${activeSliceId === scope.id ? "active" : ""}`}
+            onClick={() => onApplySlice(scope)}
+          >
+            {scope.label}
+          </button>
+        ))}
       </div>
 
       {bookmarks.length > 0 ? (

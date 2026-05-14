@@ -58,6 +58,7 @@ export interface FeederControlInput {
   communicationState: DataQuality;
   faultMode: FaultMode;
   solarKw: number;
+  waterFlowPercent: number;
 }
 
 export interface SimulatorSettings {
@@ -108,6 +109,9 @@ export interface FeederTelemetry {
   criticalCustomers: number;
   generationEquivalentHomes?: number | null;
   nominalGenerationEquivalentHomes?: number | null;
+  waterFlowPercent?: number | null;
+  generationSetpointKw?: number | null;
+  availableGenerationKw?: number | null;
   quality: DataQuality;
   protection: ProtectionSettings;
   derived: DerivedMetrics;
@@ -218,6 +222,8 @@ export interface DashboardTrends {
   voltageL3: TrendSeries[];
   currentMax: TrendSeries[];
   activePower: TrendSeries[];
+  waterFlowPercent: TrendSeries[];
+  generationSupportHomes: TrendSeries[];
   transformerLoad: TrendSeries[];
 }
 

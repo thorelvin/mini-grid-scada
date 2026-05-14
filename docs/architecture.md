@@ -4,7 +4,7 @@
 
 Mini Grid SCADA is a local demonstration platform for low-voltage grid monitoring. It combines:
 
-- simulated telemetry for a transformer and four feeders
+- simulated telemetry for a transformer, station breakers, and five feeders
 - alarm evaluation and event logging
 - conservative breaker command handling with interlocks
 - replay and incident review
@@ -93,11 +93,13 @@ The station is modeled explicitly:
 - `LV-BRK` low-voltage station breaker
 - `BUS-01` 0.4 kV busbar
 - `F1-F4` outgoing feeders
+- `F5` Romstad Kraftverk as a local hydro generation branch
 
 This allows the UI and command layer to reason about:
 
 - supply path to any object
 - downstream customer impact
+- local generation support and equivalent supplied homes
 - feeder-vs-station switching consequences
 - energized and de-energized route visualization
 
@@ -124,7 +126,7 @@ Current baseline profiles:
 - `weekend`
 - `overcast`
 
-These continuously update load, reactive power, solar contribution, and load balance.
+These continuously update load, reactive power, solar contribution, hydro water flow, and load balance.
 
 ### Timed Events
 
@@ -146,6 +148,21 @@ Current scenario library includes:
 - communication loss
 - breaker trip
 - high solar
+- hydro low flow
+- hydro intake debris
+- hydro turbine trip
+
+### Hydro Branch Model
+
+`F5 - Romstad Kraftverk` is modeled as a generation-support branch rather than a normal customer feeder.
+
+It has:
+
+- water flow percentage as an input driver
+- available generation derived from water flow
+- production setpoint capped by available generation
+- homes-equivalent support as an operator-facing derived metric
+- hydro-specific alarms and reclose blocking on unsafe intake or low-flow conditions
 
 ## 8. Commands and Interlocks
 
@@ -168,6 +185,7 @@ They influence:
 - downstream feeder power state
 - customer impact summaries
 - command previews in the selected-object panel
+- branch-by-branch restore preview and “next step” guidance
 
 Closing a station breaker is intentionally conservative and can be blocked by downstream fault state or unsafe restoration conditions.
 
@@ -195,11 +213,38 @@ Current capabilities:
 - independent time windows per chart
 - phase-specific voltage trends (`L1`, `L2`, `L3`, `all`)
 - hover inspection in the UI
-- replay timeline with event filters, stepping, and jump-to-live
+- replay timeline with event filters, bookmarks, stepping, slice presets, and jump-to-live
 
 Replay uses recent dashboard frames plus recent events to reconstruct an operator-friendly incident timeline.
 
-## 11. Responsiveness and Performance
+Incident slicing is now a first-class frontend concept:
+
+- whole-window review
+- short event-centered slices
+- longer event-centered slices
+- first-alarm-to-now slices
+
+Those slices are reused by both report preview and package export so the operator sees the same scope in replay and reporting.
+
+## 11. Incident Reporting and Shareable Packages
+
+The reporting layer now has two outputs:
+
+- markdown incident report export for readable summaries
+- JSON incident package export for replay-aware sharing
+
+The package export includes:
+
+- scope metadata for the selected incident slice
+- report preview sections
+- markdown report body
+- sorted active alarms
+- focus assets
+- recent timeline entries
+- operator notes
+
+This keeps the reporting model portable without needing a backend document pipeline yet.
+## 12. Responsiveness and Performance
 
 Current performance choices:
 
@@ -211,24 +256,27 @@ Current performance choices:
 
 The goal is smooth 2-second live updates without making the UI feel heavy.
 
-## 12. Implemented Status
+## 13. Implemented Status
 
 Implemented in the current version:
 
 - live dashboard
 - one-line diagram with feeder and station breaker modeling
+- stronger energized/de-energized route continuity in the diagram
 - object-centric trends
-- replay and incident center
+- replay with bookmarks and incident slices
+- incident center with package-ready report preview
 - simulator profiles, timed events, and fault scenarios
+- hydro generation support branch with dedicated controls and alarms
 - conservative switching flow and audit trail
 - report export
 
-## 13. Near-Term Next Steps
+## 14. Near-Term Next Steps
 
 Next development packages:
 
-- deeper energized/de-energized continuity in the one-line diagram
-- richer station-level restoration previews
-- replay bookmarks and better incident slicing
-- stronger report outputs and shareable incident bundles
+- branch-by-branch restore verification and guided station switching drills
+- richer incident exports with bundled screenshots or attached artifacts
+- replay comparison views between live state and sliced incident context
+- stronger printable handoff output for operator review
 - optional MQTT ingress path after the local core is fully stable

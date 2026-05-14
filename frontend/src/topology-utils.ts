@@ -21,6 +21,16 @@ export interface CommandPreviewSummary {
   criticalCustomers: number;
 }
 
+export interface StationBranchPreviewItem {
+  feederId: string;
+  label: string;
+  action: "drop" | "restore" | "hold" | "blocked" | "already_live" | "already_out";
+  tone: "good" | "warn" | "neutral";
+  detail: string;
+  customers: number;
+  criticalCustomers: number;
+}
+
 export interface StationRestoreAssessment {
   breakerId: "BRK-IN" | "LV-BRK";
   readyToClose: boolean;
@@ -28,8 +38,11 @@ export interface StationRestoreAssessment {
   blockingReasons: string[];
   advisoryNotes: string[];
   restoreSteps: string[];
+  nextAction: string;
   openImpact: CommandPreviewSummary;
   closeImpact: CommandPreviewSummary;
+  openBranchPreview: StationBranchPreviewItem[];
+  closeBranchPreview: StationBranchPreviewItem[];
 }
 
 function buildChildrenMap(topology: StationTopology): Map<string, string[]> {
@@ -114,6 +127,18 @@ function isDegradedCommunication(control: FeederControlInput): boolean {
     control.communicationState === "invalid" ||
     control.communicationState === "lost"
   );
+}
+
+function isGenerationSupportFeeder(feeder: FeederTelemetry): boolean {
+  return feeder.customers === 0 && (feeder.nominalGenerationEquivalentHomes ?? 0) > 0;
+}
+
+function describeBranchScope(feeder: FeederTelemetry): string {
+  if (isGenerationSupportFeeder(feeder)) {
+    return `local production support for ca. ${feeder.generationEquivalentHomes ?? 0} homes`;
+  }
+
+  return `${feeder.customers} customers, ${feeder.criticalCustomers} critical`;
 }
 
 export function getTopologyImpactSummary(
@@ -238,6 +263,7 @@ export function getStationBreakerRestoreAssessment(
 ): StationRestoreAssessment {
   const impactSummary = getTopologyImpactSummary(topology, snapshot, breakerId);
   const downstreamFeederIds = impactSummary?.downstreamFeederIds ?? snapshot.feeders.map((feeder) => feeder.id);
+  const feederById = feederMap(snapshot);
   const controlById = controlMap(controls);
   const downstreamControls = downstreamFeederIds
     .map((feederId) => controlById.get(feederId))
@@ -317,6 +343,113 @@ export function getStationBreakerRestoreAssessment(
 
   const totalCustomers = impactSummary?.totalCustomers ?? 0;
   const criticalCustomers = impactSummary?.criticalCustomers ?? 0;
+  const criticalObjectIds = new Set(
+    alarms
+      .filter((alarm) => alarm.severity === "critical" && alarm.state !== "acknowledged")
+      .map((alarm) => alarm.objectId),
+  );
+
+  const closeBranchPreview: StationBranchPreviewItem[] = downstreamFeederIds
+    .map((feederId) => feederById.get(feederId))
+    .filter((feeder): feeder is FeederTelemetry => Boolean(feeder))
+    .map((feeder): StationBranchPreviewItem => {
+      const control = controlById.get(feeder.id);
+      const feederScope = describeBranchScope(feeder);
+      const branchClosed = control?.breakerStatus === "closed";
+      const blockedByTelemetry = control ? isDegradedCommunication(control) : false;
+      const blockedByFault =
+        control?.faultMode === "overload" ||
+        control?.faultMode === "forced_trip" ||
+        control?.faultMode === "sensor_fault";
+      const blockedByAlarm = criticalObjectIds.has(feeder.id);
+
+      if (breakerId === "BRK-IN" && !lvClosed) {
+        return {
+          feederId: feeder.id,
+          label: `${feeder.id} - ${feeder.name}`,
+          action: branchClosed ? "hold" : "already_out",
+          tone: "neutral" as const,
+          detail: branchClosed
+            ? `Bus remains isolated after BRK-IN closes, so ${feederScope} is still held until LV-BRK closes.`
+            : "Feeder breaker is already open/tripped and remains isolated until it is restored later.",
+          customers: feeder.customers,
+          criticalCustomers: feeder.criticalCustomers,
+        };
+      }
+
+      if (!branchClosed) {
+        return {
+          feederId: feeder.id,
+          label: `${feeder.id} - ${feeder.name}`,
+          action: "hold" as const,
+          tone: "neutral" as const,
+          detail: isGenerationSupportFeeder(feeder)
+            ? "Feeder breaker is open/tripped, so local production stays out until the branch is restored."
+            : "Feeder breaker is open/tripped, so this branch remains isolated after station restore.",
+          customers: feeder.customers,
+          criticalCustomers: feeder.criticalCustomers,
+        };
+      }
+
+      if (blockedByTelemetry || blockedByFault || blockedByAlarm) {
+        const blockers: string[] = [];
+        if (blockedByTelemetry) {
+          blockers.push("telemetry must return to good");
+        }
+        if (blockedByFault) {
+          blockers.push("active fault mode must be cleared");
+        }
+        if (blockedByAlarm) {
+          blockers.push("critical alarm must be acknowledged");
+        }
+
+        return {
+          feederId: feeder.id,
+          label: `${feeder.id} - ${feeder.name}`,
+          action: "blocked" as const,
+          tone: "warn" as const,
+          detail: `${feederScope} stays out until ${blockers.join(", ")}.`,
+          customers: feeder.customers,
+          criticalCustomers: feeder.criticalCustomers,
+        };
+      }
+
+      return {
+        feederId: feeder.id,
+        label: `${feeder.id} - ${feeder.name}`,
+        action: isFeederEnergized(snapshot, feeder) ? ("already_live" as const) : ("restore" as const),
+        tone: isFeederEnergized(snapshot, feeder) ? ("neutral" as const) : ("good" as const),
+        detail: isGenerationSupportFeeder(feeder)
+          ? isFeederEnergized(snapshot, feeder)
+            ? `Branch is already exporting ${feederScope}.`
+            : `Branch can resume ${feederScope} as soon as the station path is restored.`
+          : isFeederEnergized(snapshot, feeder)
+            ? `Branch is already live for ${feederScope}.`
+            : `Branch can be restored for ${feederScope}.`,
+        customers: feeder.customers,
+        criticalCustomers: feeder.criticalCustomers,
+      };
+    });
+
+  const openBranchPreview: StationBranchPreviewItem[] = downstreamFeederIds
+    .map((feederId) => feederById.get(feederId))
+    .filter((feeder): feeder is FeederTelemetry => Boolean(feeder))
+    .map((feeder): StationBranchPreviewItem => {
+      const branchLive = isFeederEnergized(snapshot, feeder);
+      return {
+        feederId: feeder.id,
+        label: `${feeder.id} - ${feeder.name}`,
+        action: branchLive ? ("drop" as const) : ("already_out" as const),
+        tone: branchLive ? ("warn" as const) : ("neutral" as const),
+        detail: branchLive
+          ? isGenerationSupportFeeder(feeder)
+            ? `Opening ${breakerId} drops ${describeBranchScope(feeder)} off the bus immediately.`
+            : `${describeBranchScope(feeder)} loses supply immediately if ${breakerId} opens.`
+          : "Branch is already isolated, so opening the station path adds no new outage here.",
+        customers: feeder.customers,
+        criticalCustomers: feeder.criticalCustomers,
+      };
+    });
 
   const openImpact: CommandPreviewSummary = {
     title: "Ved utkobling",
@@ -338,11 +471,13 @@ export function getStationBreakerRestoreAssessment(
   let closeHeadline = "Ingen ny forsyning endres";
   let closeDetail = "Bryteren er allerede inne eller bus restore er ikke aktuelt na.";
   let closeTone: "good" | "warn" | "neutral" = "neutral";
+  let nextAction = "Hold the station path as-is and continue monitoring.";
 
   if (breakerId === "BRK-IN" && !lvClosed) {
     closeHeadline = "Kun transformatoren blir energisert";
     closeDetail = "Lavspentbussen forblir isolert til LV-BRK lukkes i neste steg.";
     closeTone = "good";
+    nextAction = "Close BRK-IN, verify transformer health, then use LV-BRK for controlled bus restore.";
   } else if (totalCustomers > 0) {
     closeHeadline = blockingReasons.length
       ? "Restore er fortsatt sperret"
@@ -351,6 +486,16 @@ export function getStationBreakerRestoreAssessment(
       ? "Rydd sperrene under restore-statusen for stasjonslukking."
       : `${criticalCustomers} kritiske kunder kan gjeninnkobles hvis downstream brytere er klare.`;
     closeTone = blockingReasons.length ? "warn" : "good";
+    nextAction = blockingReasons.length
+      ? "Clear the blocking conditions below before closing this station breaker."
+      : breakerId === "LV-BRK"
+        ? "Close LV-BRK, then confirm each downstream feeder branch picks up as expected."
+        : "Close BRK-IN and watch every already-closed downstream branch during restore.";
+  } else {
+    nextAction =
+      breakerId === "BRK-IN"
+        ? "Use BRK-IN to re-energize the transformer path before you touch the low-voltage bus."
+        : "Use LV-BRK only after BRK-IN and the transformer path are confirmed healthy.";
   }
 
   return {
@@ -360,6 +505,7 @@ export function getStationBreakerRestoreAssessment(
     blockingReasons,
     advisoryNotes,
     restoreSteps,
+    nextAction,
     openImpact,
     closeImpact: {
       title: "Ved innkobling",
@@ -369,6 +515,8 @@ export function getStationBreakerRestoreAssessment(
       customers: totalCustomers,
       criticalCustomers,
     },
+    openBranchPreview,
+    closeBranchPreview,
   };
 }
 

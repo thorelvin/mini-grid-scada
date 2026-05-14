@@ -28,6 +28,8 @@ export function getTrends(params?: {
   voltageWindowSec?: number;
   currentWindowSec?: number;
   activePowerWindowSec?: number;
+  waterFlowWindowSec?: number;
+  generationSupportWindowSec?: number;
   transformerWindowSec?: number;
 }): Promise<DashboardTrends> {
   const searchParams = new URLSearchParams();
@@ -39,6 +41,12 @@ export function getTrends(params?: {
   }
   if (params?.activePowerWindowSec) {
     searchParams.set("active_power_window_sec", String(params.activePowerWindowSec));
+  }
+  if (params?.waterFlowWindowSec) {
+    searchParams.set("water_flow_window_sec", String(params.waterFlowWindowSec));
+  }
+  if (params?.generationSupportWindowSec) {
+    searchParams.set("generation_support_window_sec", String(params.generationSupportWindowSec));
   }
   if (params?.transformerWindowSec) {
     searchParams.set("transformer_window_sec", String(params.transformerWindowSec));

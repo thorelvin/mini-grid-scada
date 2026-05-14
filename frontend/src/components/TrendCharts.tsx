@@ -19,7 +19,13 @@ interface TrendChartsProps {
   snapshot?: StationSnapshot | null;
 }
 
-type TrendMetricKey = "voltage" | "currentMax" | "activePower" | "transformerLoad";
+type TrendMetricKey =
+  | "voltage"
+  | "currentMax"
+  | "activePower"
+  | "waterFlow"
+  | "generationSupport"
+  | "transformerLoad";
 type TrendWindowState = Record<TrendMetricKey, number>;
 type TrendScopeMode = "selected" | "overview";
 type VoltagePhase = "l1" | "l2" | "l3" | "all";
@@ -516,6 +522,8 @@ export function TrendCharts({
     voltage: DEFAULT_TREND_WINDOW_SEC,
     currentMax: DEFAULT_TREND_WINDOW_SEC,
     activePower: DEFAULT_TREND_WINDOW_SEC,
+    waterFlow: DEFAULT_TREND_WINDOW_SEC,
+    generationSupport: DEFAULT_TREND_WINDOW_SEC,
     transformerLoad: DEFAULT_TREND_WINDOW_SEC,
   });
   const [customTrends, setCustomTrends] = useState<DashboardTrends | null>(null);
@@ -553,6 +561,8 @@ export function TrendCharts({
       voltageWindowSec: trendWindows.voltage,
       currentWindowSec: trendWindows.currentMax,
       activePowerWindowSec: trendWindows.activePower,
+      waterFlowWindowSec: trendWindows.waterFlow,
+      generationSupportWindowSec: trendWindows.generationSupport,
       transformerWindowSec: trendWindows.transformerLoad,
     })
       .then((nextTrends) => {
@@ -591,10 +601,25 @@ export function TrendCharts({
     resolvedScopeMode === "selected" && selectedFeeder
       ? activeTrends?.activePower.filter((series) => series.id === selectedFeeder.id) ?? []
       : [];
+  const scopedWaterFlowSeries =
+    resolvedScopeMode === "selected" && selectedFeeder
+      ? activeTrends?.waterFlowPercent.filter((series) => series.id === selectedFeeder.id) ?? []
+      : [];
+  const scopedGenerationSupportSeries =
+    resolvedScopeMode === "selected" && selectedFeeder
+      ? activeTrends?.generationSupportHomes.filter((series) => series.id === selectedFeeder.id) ?? []
+      : [];
   const scopedTransformerSeries = activeTrends?.transformerLoad ?? [];
   const hasTrendPoints =
     !!activeTrends &&
-    [...scopedVoltageSeries, ...scopedCurrentSeries, ...scopedActivePowerSeries, ...scopedTransformerSeries].some(
+    [
+      ...scopedVoltageSeries,
+      ...scopedCurrentSeries,
+      ...scopedActivePowerSeries,
+      ...scopedWaterFlowSeries,
+      ...scopedGenerationSupportSeries,
+      ...scopedTransformerSeries,
+    ].some(
       (series) => series.points.length > 0,
     );
 
@@ -691,14 +716,16 @@ export function TrendCharts({
             <p>{getPowerModeLabel(selectedGenerationFeeder.activePowerKw)}</p>
           </article>
           <article className="trend-support-card">
-            <span>Kan forsyne ca.</span>
-            <strong>{getSupportHomesLabel(selectedGenerationFeeder)}</strong>
-            <p>Estimert lokal stotte fra Romstad Kraftverk akkurat na.</p>
+            <span>Vannforing</span>
+            <strong>{`${formatValue(selectedGenerationFeeder.waterFlowPercent ?? 0, 0)} %`}</strong>
+            <p>Tilgjengelig vann driver hvor mye Romstad Kraftverk faktisk kan levere.</p>
           </article>
           <article className="trend-support-card">
-            <span>Reaktiv stotte</span>
-            <strong>{`${selectedGenerationFeeder.reactivePowerKvar < 0 ? "-" : ""}${formatValue(Math.abs(selectedGenerationFeeder.reactivePowerKvar), 0)} kVAr`}</strong>
-            <p>Brukes for a lese hvordan F5 stotter eller trekker pa spenningsnivaaet.</p>
+            <span>Kan forsyne ca.</span>
+            <strong>{getSupportHomesLabel(selectedGenerationFeeder)}</strong>
+            <p>
+              {`${formatValue(selectedGenerationFeeder.availableGenerationKw ?? 0, 0)} kW tilgjengelig / ${formatValue(selectedGenerationFeeder.generationSetpointKw ?? 0, 0)} kW settpunkt akkurat na.`}
+            </p>
           </article>
         </div>
       ) : null}
@@ -729,6 +756,28 @@ export function TrendCharts({
             seriesCollection={scopedActivePowerSeries}
             windowSec={trendWindows.activePower}
             onWindowChange={(nextWindowSec) => updateWindow("activePower", nextWindowSec)}
+            isRefreshing={isRefreshing && hasCustomWindowSelection}
+            focusTimestamp={focusTimestamp}
+          />
+        ) : null}
+        {selectedGenerationFeeder ? (
+          <LineChartCard
+            title="Vannforing"
+            unit="%"
+            seriesCollection={scopedWaterFlowSeries}
+            windowSec={trendWindows.waterFlow}
+            onWindowChange={(nextWindowSec) => updateWindow("waterFlow", nextWindowSec)}
+            isRefreshing={isRefreshing && hasCustomWindowSelection}
+            focusTimestamp={focusTimestamp}
+          />
+        ) : null}
+        {selectedGenerationFeeder ? (
+          <LineChartCard
+            title="Forsyningsstotte"
+            unit="boliger"
+            seriesCollection={scopedGenerationSupportSeries}
+            windowSec={trendWindows.generationSupport}
+            onWindowChange={(nextWindowSec) => updateWindow("generationSupport", nextWindowSec)}
             isRefreshing={isRefreshing && hasCustomWindowSelection}
             focusTimestamp={focusTimestamp}
           />

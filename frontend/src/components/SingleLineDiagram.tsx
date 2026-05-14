@@ -173,6 +173,17 @@ function renderRouteSegment({
 
   return (
     <g className={`diagram-route-segment state-${state} ${selected ? "selected" : ""}`}>
+      <line
+        className="diagram-route-base"
+        x1={x1}
+        y1={y1}
+        x2={x2}
+        y2={y2}
+        stroke="rgba(145, 169, 184, 0.28)"
+        strokeWidth={style.strokeWidth + 3 + accentWidth}
+        strokeOpacity={selected ? 0.4 : 0.28}
+        strokeLinecap="round"
+      />
       {glowOpacity > 0 ? (
         <line
           className={`diagram-route-glow state-${state}`}
@@ -216,6 +227,13 @@ function renderRouteNode(
 
   return (
     <g className={`diagram-route-node state-${state} ${selected ? "selected" : ""}`}>
+      <circle
+        className="diagram-route-node-base"
+        cx={x}
+        cy={y}
+        r={selected ? 12.6 : 10.6}
+        fill="rgba(145, 169, 184, 0.2)"
+      />
       <circle
         className="diagram-route-node-halo"
         cx={x}
@@ -534,6 +552,24 @@ function renderNodeBox(
         ry={CARD_RADIUS}
       />
       <rect
+        className={`diagram-svg-state-surface power-${powerState}`}
+        x={box.x + 12}
+        y={box.y + 12}
+        width={box.width - 24}
+        height={Math.min(92, box.height - 24)}
+        rx={CARD_RADIUS - 8}
+        ry={CARD_RADIUS - 8}
+      />
+      <rect
+        className={`diagram-svg-state-rail power-${powerState}`}
+        x={box.x + 10}
+        y={box.y + 14}
+        width={6}
+        height={box.height - 28}
+        rx={3}
+        ry={3}
+      />
+      <rect
         className={`diagram-svg-box-veil power-${powerState}`}
         x={box.x}
         y={box.y}
@@ -748,6 +784,43 @@ export function SingleLineDiagram({
             ))}
           </g>
 
+          <rect
+            className={`diagram-state-zone power-${supplyRouteState}`}
+            x={INLET_BOX.x + INLET_BOX.width - 18}
+            y={supplyLineY - 30}
+            width={TRANSFORMER_BOX.x - (INLET_BOX.x + INLET_BOX.width) + 36}
+            height={60}
+            rx={24}
+            ry={24}
+          />
+          <rect
+            className={`diagram-state-zone power-${transformerRouteState}`}
+            x={transformerCenterX - 46}
+            y={TRANSFORMER_BOX.y + TRANSFORMER_BOX.height - 6}
+            width={92}
+            height={BUSBAR_Y - (TRANSFORMER_BOX.y + TRANSFORMER_BOX.height) + 58}
+            rx={26}
+            ry={26}
+          />
+          <rect
+            className={`diagram-state-zone power-${busRouteState}`}
+            x={DIAGRAM_SIDE_PADDING - 8}
+            y={BUSBAR_Y - 26}
+            width={VIEWBOX_WIDTH - DIAGRAM_SIDE_PADDING * 2 + 16}
+            height={48}
+            rx={20}
+            ry={20}
+          />
+          <rect
+            className={`diagram-state-zone downstream-zone power-${busRouteState}`}
+            x={feederRowStartX - 18}
+            y={BUSBAR_Y + 18}
+            width={feederRowWidth + 36}
+            height={FEEDER_BOX_Y + FEEDER_BOX_HEIGHT - (BUSBAR_Y + 18)}
+            rx={30}
+            ry={30}
+          />
+
           <g className="diagram-svg-route">
             {renderRouteSegment({
               x1: INLET_BOX.x + INLET_BOX.width,
@@ -838,7 +911,7 @@ export function SingleLineDiagram({
               transformerRouteState,
               selectsTransformerPath,
             )}
-            {renderRouteNode(transformerCenterX, BUSBAR_Y, supplyTone, transformerRouteState, selectsBusPath)}
+            {renderRouteNode(transformerCenterX, BUSBAR_Y, supplyTone, busRouteState, selectsBusPath)}
 
             <text className="diagram-svg-annotation-large" x={DIAGRAM_SIDE_PADDING} y={BUSBAR_Y - 18}>
               0.4 kV samleskinne

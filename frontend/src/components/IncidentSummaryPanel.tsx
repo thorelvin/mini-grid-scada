@@ -8,6 +8,7 @@ import {
   inferProbableCause,
   isSelectableAssetId,
   type IncidentReportSection,
+  type IncidentHistoryScope,
 } from "../incident-utils";
 import { getBreakerOutcomeLabel } from "../topology-utils";
 import type { DashboardPayload } from "../types";
@@ -18,9 +19,13 @@ interface IncidentSummaryPanelProps {
   replayMode: boolean;
   selectedAssetId: string | null;
   reportPreviewSections: IncidentReportSection[];
+  incidentScope: IncidentHistoryScope;
+  incidentNotes: string;
   onSelectAsset: (assetId: string) => void;
   onJumpToTimestamp: (timestamp: string) => void;
   onExportReport: () => void;
+  onExportPackage: () => void;
+  onChangeIncidentNotes: (value: string) => void;
 }
 
 export function IncidentSummaryPanel({
@@ -29,9 +34,13 @@ export function IncidentSummaryPanel({
   replayMode,
   selectedAssetId,
   reportPreviewSections,
+  incidentScope,
+  incidentNotes,
   onSelectAsset,
   onJumpToTimestamp,
   onExportReport,
+  onExportPackage,
+  onChangeIncidentNotes,
 }: IncidentSummaryPanelProps) {
   const [showReportPreview, setShowReportPreview] = useState(true);
 
@@ -56,6 +65,7 @@ export function IncidentSummaryPanel({
   const activeTimedEvents = dashboard.activeTimedEvents.map((event) => event.name);
   const focusFeeders = buildFocusFeeders(dashboard);
   const probableCause = inferProbableCause(dashboard, history);
+  const scopedEventCount = recentTimeline.length;
 
   return (
     <section className="panel scada-panel incident-panel">
@@ -101,6 +111,12 @@ export function IncidentSummaryPanel({
           <span>Driftstilstand</span>
           <strong>{activeProfileName}</strong>
           <p>{activeTimedEvents.length ? activeTimedEvents.join(", ") : "Ingen aktive overlays eller events."}</p>
+        </article>
+
+        <article className="incident-summary-card">
+          <span>Rapportscope</span>
+          <strong>{incidentScope.label}</strong>
+          <p>{history.length} frames / {scopedEventCount} hendelser i valgt utsnitt.</p>
         </article>
       </div>
 
@@ -225,7 +241,21 @@ export function IncidentSummaryPanel({
               <button type="button" className="primary-button compact-button" onClick={onExportReport}>
                 Eksporter rapport
               </button>
+              <button type="button" className="secondary-button compact-button" onClick={onExportPackage}>
+                Eksporter pakke
+              </button>
             </div>
+          </div>
+
+          <div className="incident-note-editor">
+            <label htmlFor="incident-notes">Operatornotater</label>
+            <textarea
+              id="incident-notes"
+              value={incidentNotes}
+              onChange={(event) => onChangeIncidentNotes(event.target.value)}
+              placeholder="Legg inn korte notater som skal bli med i rapport og incident package."
+              rows={4}
+            />
           </div>
 
           {showReportPreview ? (

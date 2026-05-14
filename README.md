@@ -4,7 +4,7 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-0F172A?logo=fastapi&logoColor=00C7B7)
 ![React](https://img.shields.io/badge/React-0F172A?logo=react&logoColor=61DAFB)
 ![TypeScript](https://img.shields.io/badge/TypeScript-0F172A?logo=typescript&logoColor=3178C6)
-![Status](https://img.shields.io/badge/Status-First%20release-8ddf57)
+![Status](https://img.shields.io/badge/Status-v0.2.0-8ddf57)
 
 SCADA-inspired operator dashboard for a simulated low-voltage distribution station.
 
@@ -31,15 +31,16 @@ This repository is built as a portfolio and demo project for grid monitoring, sw
 - SCADA-style dashboard layout with live system status and selected-object drilldown
 - SVG-based one-line diagram with feeder breakers, `BRK-IN`, `LV-BRK`, transformer path, and energized/de-energized route styling
 - Object-centric trends with per-chart time windows and hover tooltip readout
-- Replay timeline with event filtering, stepping, and jump-to-live flow
-- Incident center with posture summary, impact, recommended actions, and focus objects
+- Replay timeline with event filtering, bookmarks, stepping, slice presets, and jump-to-live flow
+- Incident center with posture summary, impact, recommended actions, focus objects, operator notes, and export preview
 
 ### Simulation
 
 - Continuous normal profiles such as `weekday`, `winter_day`, `weekend`, and `overcast`
 - Timed overlays such as school start, EV rush, cloud front, and evening peak
 - Explicit fault scenarios including EV peak, phase imbalance, comms loss, breaker trip, and high solar
-- Manual feeder controls for load, reactive power, phase imbalance, breaker state, communications quality, and solar production
+- Hydro generation support on `F5 - Romstad Kraftverk` with water flow, available generation, and hydro-specific scenarios
+- Manual feeder controls for load, reactive power, phase imbalance, breaker state, communications quality, solar production, and water flow
 
 ### Switching and Interlocks
 
@@ -47,12 +48,14 @@ This repository is built as a portfolio and demo project for grid monitoring, sw
 - Operator reason and impact confirmation for switching
 - Interlocks for active faults, degraded telemetry, and unacknowledged critical alarms
 - Station-level breaker modeling for `BRK-IN` and `LV-BRK`
+- Branch-by-branch restore preview for station breakers with next-step guidance
 - Command outcomes written back into the event log and dashboard state
 
 ### Reporting
 
 - Markdown incident report export from the UI
-- Report content includes system posture, customer impact, telemetry quality, recommended actions, active alarms, and recent timeline
+- JSON incident package export for sharing replay context, notes, focus objects, alarms, and timeline
+- Report content includes system posture, customer impact, telemetry quality, recommended actions, active alarms, recent timeline, and operator notes
 
 ## Architecture At A Glance
 
@@ -171,7 +174,7 @@ npm run build
 
 Release candidate verification used for this version:
 
-- `17 passed` backend tests
+- `27 passed` backend tests
 - successful `npm run build`
 - live UI verified on `http://127.0.0.1:5173/`
 - README screenshots captured from the running local app
@@ -182,9 +185,11 @@ Implemented in this first release:
 
 - live dashboard payload and UI rendering
 - object-aware trends with phase selection and hover values
-- replay timeline and incident center
+- replay timeline with bookmarks and incident slices
+- incident center with operator notes and package export
 - station breaker support for `BRK-IN` and `LV-BRK`
-- topology-aware impact summaries and switching previews
+- topology-aware impact summaries, restore previews, and station switching guidance
+- hydro generation branch `F5 - Romstad Kraftverk`
 - simulator profiles, timed events, and fault scenarios
 - report export and event/audit flow
 
@@ -192,10 +197,11 @@ Implemented in this first release:
 
 Planned next development packages:
 
-- richer energized/de-energized styling all the way through the one-line diagram
-- improved station-level switching workflow and consequence preview
-- deeper replay tools with bookmarks and incident slicing
-- stronger report generation and shareable incident packages
+- branch-by-branch restore verification and guided station switching drills
+- station switching drills with scripted recovery playbooks
+- richer incident exports with bundled screenshots or attached artifacts
+- deeper replay comparison views between live state and incident slices
+- stronger report generation with printable handoff format
 - optional MQTT ingestion path once the local core is fully stable
 
 ## Safety Note

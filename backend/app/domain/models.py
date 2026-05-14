@@ -71,6 +71,7 @@ class FeederControlInput(DomainModel):
     communicationState: DataQuality = DataQuality.GOOD
     faultMode: FaultMode = FaultMode.NORMAL
     solarKw: float = 0.0
+    waterFlowPercent: float = 100.0
 
 
 class FeederControlPatch(DomainModel):
@@ -81,6 +82,7 @@ class FeederControlPatch(DomainModel):
     communicationState: DataQuality | None = None
     faultMode: FaultMode | None = None
     solarKw: float | None = None
+    waterFlowPercent: float | None = None
 
 
 class SimulatorSettings(DomainModel):
@@ -136,6 +138,9 @@ class FeederTelemetry(DomainModel):
     criticalCustomers: int
     generationEquivalentHomes: int | None = None
     nominalGenerationEquivalentHomes: int | None = None
+    waterFlowPercent: float | None = None
+    generationSetpointKw: float | None = None
+    availableGenerationKw: float | None = None
     quality: DataQuality
     protection: ProtectionSettings
     derived: DerivedMetrics
@@ -216,6 +221,8 @@ class DashboardTrends(DomainModel):
     voltageL3: list[TrendSeries]
     currentMax: list[TrendSeries]
     activePower: list[TrendSeries]
+    waterFlowPercent: list[TrendSeries]
+    generationSupportHomes: list[TrendSeries]
     transformerLoad: list[TrendSeries]
 
 

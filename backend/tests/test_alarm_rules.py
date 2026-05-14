@@ -50,3 +50,42 @@ def test_service_target_voltage_biases_snapshot_toward_realistic_house_voltage()
     )
 
     assert calibrated_snapshot.transformer.secondaryVoltageV > baseline_snapshot.transformer.secondaryVoltageV
+
+
+def test_hydro_low_flow_and_derating_generate_specific_alarms():
+    controls = create_default_controls()
+    controls[4] = controls[4].model_copy(update={"waterFlowPercent": 30.0, "solarKw": 96.0})
+
+    snapshot = build_snapshot(
+        station_id="NST-001",
+        mode="simulation",
+        controls=controls,
+        ambient_temp_c=18.0,
+        nominal_phase_voltage_v=230.0,
+        nominal_line_voltage_v=400.0,
+        transformer_rating_kva=1250.0,
+    )
+
+    alarms = evaluate_snapshot(snapshot)
+
+    assert any(alarm.objectId == "F5" and alarm.title == "Low water flow" for alarm in alarms)
+    assert any(alarm.objectId == "F5" and alarm.title == "Hydro generation derated" for alarm in alarms)
+
+
+def test_hydro_intake_restriction_alarm_appears_for_estimated_low_flow():
+    controls = create_default_controls()
+    controls[4] = controls[4].model_copy(update={"waterFlowPercent": 42.0, "communicationState": "estimated", "solarKw": 94.0})
+
+    snapshot = build_snapshot(
+        station_id="NST-001",
+        mode="simulation",
+        controls=controls,
+        ambient_temp_c=18.0,
+        nominal_phase_voltage_v=230.0,
+        nominal_line_voltage_v=400.0,
+        transformer_rating_kva=1250.0,
+    )
+
+    alarms = evaluate_snapshot(snapshot)
+
+    assert any(alarm.objectId == "F5" and alarm.title == "Intake restriction suspected" for alarm in alarms)

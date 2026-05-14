@@ -75,7 +75,13 @@ SCENARIO_LIBRARY: dict[str, dict[str, object]] = {
         ),
         "rampSec": 150,
         "control_targets": {
-            "F5": {"solarKw": 34.0, "loadKw": 20.0, "reactivePowerKvar": -2.0, "phaseImbalancePercent": 2.4},
+            "F5": {
+                "solarKw": 96.0,
+                "waterFlowPercent": 28.0,
+                "loadKw": 20.0,
+                "reactivePowerKvar": -2.0,
+                "phaseImbalancePercent": 2.4,
+            },
         },
         "settings_targets": {"ambientTempC": 17.0},
     },
@@ -88,7 +94,8 @@ SCENARIO_LIBRARY: dict[str, dict[str, object]] = {
         "rampSec": 120,
         "control_targets": {
             "F5": {
-                "solarKw": 48.0,
+                "solarKw": 94.0,
+                "waterFlowPercent": 44.0,
                 "loadKw": 22.0,
                 "reactivePowerKvar": 2.0,
                 "phaseImbalancePercent": 3.0,
@@ -108,6 +115,7 @@ SCENARIO_LIBRARY: dict[str, dict[str, object]] = {
         "control_targets": {
             "F5": {
                 "solarKw": 0.0,
+                "waterFlowPercent": 76.0,
                 "loadKw": 6.0,
                 "reactivePowerKvar": 1.0,
                 "breakerStatus": "tripped",

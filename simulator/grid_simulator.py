@@ -76,6 +76,7 @@ def create_default_controls() -> list[FeederControlInput]:
                 reactivePowerKvar=float(profile["defaultReactivePowerKvar"]),
                 phaseImbalancePercent=6.0 if feeder_id == "F1" else 2.0 if feeder_id == "F5" else 3.0,
                 solarKw=float(profile.get("defaultSolarKw", 0.0)),
+                waterFlowPercent=float(profile.get("defaultWaterFlowPercent", 100.0)),
             )
         )
 
@@ -98,6 +99,27 @@ def _power_direction(net_kw: float) -> PowerDirection:
 
 def _bounded(value: float, minimum: float, maximum: float) -> float:
     return max(minimum, min(maximum, value))
+
+
+def _hydro_available_generation_kw(profile: dict[str, float | int | str], water_flow_percent: float) -> float:
+    max_generation_kw = float(profile.get("maxGenerationKw", 0.0) or 0.0)
+    min_stable_generation_kw = float(profile.get("minStableGenerationKw", 0.0) or 0.0)
+    min_stable_water_flow_percent = float(profile.get("minStableWaterFlowPercent", 0.0) or 0.0)
+
+    if max_generation_kw <= 0:
+        return 0.0
+
+    clamped_flow_percent = _bounded(water_flow_percent, 0.0, 130.0)
+    water_fraction = clamped_flow_percent / 100.0
+    available_kw = max_generation_kw * (water_fraction**1.12)
+
+    if 0.0 < clamped_flow_percent < min_stable_water_flow_percent:
+        available_kw *= clamped_flow_percent / max(min_stable_water_flow_percent, 1.0)
+
+    if available_kw < min_stable_generation_kw and clamped_flow_percent < min_stable_water_flow_percent:
+        return round(max(available_kw, 0.0), 1)
+
+    return round(_bounded(available_kw, 0.0, max_generation_kw), 1)
 
 
 def _phase_values(mean_value: float, imbalance_percent: float, spread_factor: float = 1.0) -> PhaseValues:
@@ -127,6 +149,19 @@ def _build_feeder_telemetry(
     load_kw = control.loadKw
     reactive_kvar = control.reactivePowerKvar
     solar_kw = control.solarKw
+    water_flow_percent: float | None = None
+    generation_setpoint_kw: float | None = None
+    available_generation_kw: float | None = None
+
+    if control.id == "F5":
+        water_flow_percent = round(control.waterFlowPercent, 1)
+        generation_setpoint_kw = round(max(control.solarKw, 0.0), 1)
+        available_generation_kw = _hydro_available_generation_kw(profile, water_flow_percent)
+        min_stable_generation_kw = float(profile.get("minStableGenerationKw", 0.0) or 0.0)
+        if available_generation_kw < min_stable_generation_kw and generation_setpoint_kw > 0:
+            solar_kw = 0.0
+        else:
+            solar_kw = min(generation_setpoint_kw, available_generation_kw)
 
     if control.faultMode == FaultMode.OVERLOAD:
         load_kw *= 1.25
@@ -212,6 +247,9 @@ def _build_feeder_telemetry(
         criticalCustomers=int(profile["criticalCustomers"]),
         generationEquivalentHomes=generation_equivalent_homes,
         nominalGenerationEquivalentHomes=nominal_generation_homes,
+        waterFlowPercent=water_flow_percent,
+        generationSetpointKw=generation_setpoint_kw,
+        availableGenerationKw=available_generation_kw,
         quality=quality,
         protection=protection,
         derived=DerivedMetrics(

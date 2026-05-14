@@ -48,6 +48,8 @@ def test_trend_windows_can_be_requested_per_metric():
             voltage_window_sec=15 * 60,
             current_window_sec=30 * 60,
             active_power_window_sec=20 * 60,
+            water_flow_window_sec=20 * 60,
+            generation_support_window_sec=20 * 60,
             transformer_window_sec=60 * 60,
         )
 
@@ -56,6 +58,10 @@ def test_trend_windows_can_be_requested_per_metric():
         assert len(trends.voltageL3[0].points) == 2
         assert len(trends.currentMax[0].points) == 4
         assert len(trends.activePower[0].points) == 3
+        assert len(trends.waterFlowPercent) == 1
+        assert len(trends.waterFlowPercent[0].points) == 3
+        assert len(trends.generationSupportHomes) == 1
+        assert len(trends.generationSupportHomes[0].points) == 3
         assert len(trends.transformerLoad[0].points) == 6
 
     asyncio.run(run())

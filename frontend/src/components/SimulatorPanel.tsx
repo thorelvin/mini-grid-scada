@@ -95,9 +95,16 @@ function getGenerationLabel(feederId: string): string {
     return "Solproduksjon F4 (kW)";
   }
   if (feederId === "F5") {
-    return "Vannkraft F5 (kW)";
+    return "Produksjonssettpunkt F5 (kW)";
   }
   return "Lokal produksjon (kW)";
+}
+
+function getWaterFlowLabel(feederId: string): string {
+  if (feederId === "F5") {
+    return "Vannforing F5 (%)";
+  }
+  return "Vannforing (%)";
 }
 
 export function SimulatorPanel({
@@ -268,6 +275,37 @@ export function SimulatorPanel({
                         setDrafts((current) => ({
                           ...current,
                           [control.id]: { ...draft, solarKw: Number(event.target.value) },
+                        }))
+                      }
+                    />
+                  </>
+                ) : null}
+
+                {control.id === "F5" ? (
+                  <>
+                    <div className="slider-header">
+                      <strong>{getWaterFlowLabel(control.id)}</strong>
+                      <input
+                        type="number"
+                        value={draft.waterFlowPercent}
+                        onChange={(event) =>
+                          setDrafts((current) => ({
+                            ...current,
+                            [control.id]: { ...draft, waterFlowPercent: Number(event.target.value) },
+                          }))
+                        }
+                      />
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="120"
+                      step="1"
+                      value={draft.waterFlowPercent}
+                      onChange={(event) =>
+                        setDrafts((current) => ({
+                          ...current,
+                          [control.id]: { ...draft, waterFlowPercent: Number(event.target.value) },
                         }))
                       }
                     />
@@ -451,6 +489,23 @@ export function SimulatorPanel({
                       <option value="lost">{getQualityLabel("lost")}</option>
                     </select>
                   </label>
+                  {control.id === "F5" ? (
+                    <label>
+                      Vannforing (%)
+                      <input
+                        type="number"
+                        min="0"
+                        max="120"
+                        value={draft.waterFlowPercent}
+                        onChange={(event) =>
+                          setDrafts((current) => ({
+                            ...current,
+                            [control.id]: { ...draft, waterFlowPercent: Number(event.target.value) },
+                          }))
+                        }
+                      />
+                    </label>
+                  ) : null}
                   <label className="control-grid-span">
                     Feilmodus
                     <select

@@ -11,7 +11,14 @@ import { SingleLineDiagram } from "./components/SingleLineDiagram";
 import { StatusFooter } from "./components/StatusFooter";
 import { TopBar } from "./components/TopBar";
 import { TrendCharts } from "./components/TrendCharts";
-import { buildIncidentReport, buildRecentTimeline, buildIncidentReportPreview } from "./incident-utils";
+import {
+  buildIncidentExportPackage,
+  buildIncidentReport,
+  buildRecentTimeline,
+  buildIncidentReportPreview,
+  sliceHistoryByTimestamp,
+  type IncidentHistoryScope,
+} from "./incident-utils";
 import { useTelemetryStore } from "./state/useTelemetryStore";
 import type { DashboardPayload } from "./types";
 
@@ -57,6 +64,13 @@ export default function App() {
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [replayIndex, setReplayIndex] = useState<number | null>(null);
   const [isReplayPlaying, setIsReplayPlaying] = useState(false);
+  const [incidentNotes, setIncidentNotes] = useState("");
+  const [incidentScope, setIncidentScope] = useState<IncidentHistoryScope>({
+    id: "full",
+    label: "Hele vinduet",
+    startTimestamp: null,
+    endTimestamp: null,
+  });
 
   const liveDashboard = useDeferredValue(dashboard);
   const replayFrame =
@@ -66,6 +80,11 @@ export default function App() {
   const renderedDashboard = replayFrame ?? liveDashboard;
   const replayMode = replayIndex !== null;
   const replayBusy = isPending || replayMode;
+  const scopedHistory = useMemo(
+    () => sliceHistoryByTimestamp(dashboardHistory, incidentScope.startTimestamp, incidentScope.endTimestamp),
+    [dashboardHistory, incidentScope.endTimestamp, incidentScope.startTimestamp],
+  );
+  const effectiveReportHistory = scopedHistory.length > 0 ? scopedHistory : dashboardHistory;
 
   useEffect(() => {
     if (dashboardHistory.length === 0 || replayIndex == null) {
@@ -125,21 +144,58 @@ export default function App() {
   const reportPreviewSections = useMemo(
     () =>
       renderedDashboard
-        ? buildIncidentReportPreview(renderedDashboard, dashboardHistory, replayMode)
+        ? buildIncidentReportPreview(
+            renderedDashboard,
+            effectiveReportHistory,
+            replayMode,
+            incidentScope.label,
+            incidentNotes,
+          )
         : [],
-    [dashboardHistory, renderedDashboard, replayMode],
+    [effectiveReportHistory, incidentNotes, incidentScope.label, replayMode, renderedDashboard],
   );
 
   function exportReport() {
     if (!renderedDashboard) {
       return;
     }
-    const reportText = buildIncidentReport(renderedDashboard, dashboardHistory, replayMode);
+    const reportText = buildIncidentReport(
+      renderedDashboard,
+      effectiveReportHistory,
+      replayMode,
+      incidentScope.label,
+      incidentNotes,
+    );
     const blob = new Blob([reportText], { type: "text/markdown;charset=utf-8" });
     const href = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = href;
     link.download = `scada-report-${new Date().toISOString().replace(/:/g, "-")}.md`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(href);
+  }
+
+  function exportIncidentPackage() {
+    if (!renderedDashboard) {
+      return;
+    }
+
+    const exportPackage = buildIncidentExportPackage(
+      renderedDashboard,
+      effectiveReportHistory,
+      replayMode,
+      incidentScope,
+      incidentNotes,
+    );
+    const blob = new Blob([JSON.stringify(exportPackage, null, 2)], {
+      type: "application/json;charset=utf-8",
+    });
+    const href = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = href;
+    link.download = `scada-incident-package-${new Date().toISOString().replace(/:/g, "-")}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -230,20 +286,26 @@ export default function App() {
             history={dashboardHistory}
             replayIndex={replayIndex}
             isPlaying={isReplayPlaying}
+            activeSliceId={incidentScope.id}
             onSelectIndex={handleSelectReplayIndex}
             onStep={handleStepReplay}
             onTogglePlay={handleToggleReplay}
             onJumpLive={handleJumpLive}
+            onApplySlice={setIncidentScope}
           />
           <IncidentSummaryPanel
             dashboard={renderedDashboard}
-            history={dashboardHistory}
+            history={effectiveReportHistory}
             replayMode={replayMode}
             selectedAssetId={selectedAssetId}
             reportPreviewSections={reportPreviewSections}
+            incidentScope={incidentScope}
+            incidentNotes={incidentNotes}
             onSelectAsset={setSelectedAssetId}
             onJumpToTimestamp={handleJumpToTimestamp}
             onExportReport={exportReport}
+            onExportPackage={exportIncidentPackage}
+            onChangeIncidentNotes={setIncidentNotes}
           />
         </section>
 
